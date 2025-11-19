@@ -1,13 +1,9 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"time"
 
-	"github.com/rkoster/deskrun/internal/cluster"
 	"github.com/rkoster/deskrun/internal/config"
-	"github.com/rkoster/deskrun/internal/runner"
 	"github.com/rkoster/deskrun/pkg/types"
 	"github.com/spf13/cobra"
 )
@@ -24,8 +20,11 @@ var (
 
 var addCmd = &cobra.Command{
 	Use:   "add <name>",
-	Short: "Add a new runner installation",
-	Long: `Add a new GitHub Actions runner installation to the kind cluster.
+	Short: "Add a new runner installation to configuration",
+	Long: `Add a new GitHub Actions runner installation to the deskrun configuration.
+
+This is a config-only operation. After adding a runner, you need to run 'deskrun up'
+to deploy the changes to the cluster.
 
 The installation will be configured with the specified container mode and
 authentication credentials. Use different container modes based on your needs:
@@ -50,6 +49,9 @@ Examples:
     --repository https://github.com/owner/repo \
     --mode dind \
     --auth-type pat --auth-value ghp_xxx
+
+  # After adding, deploy the configuration
+  deskrun up
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: runAdd,
@@ -124,40 +126,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Check if cluster exists, create if needed
-	clusterConfig := &types.ClusterConfig{
-		Name: configMgr.GetConfig().ClusterName,
-	}
-	clusterMgr := cluster.NewManager(clusterConfig)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	exists, err := clusterMgr.Exists(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to check cluster: %w", err)
-	}
-
-	if !exists {
-		fmt.Printf("Creating kind cluster '%s'...\n", clusterConfig.Name)
-		if err := clusterMgr.Create(ctx); err != nil {
-			return fmt.Errorf("failed to create cluster: %w", err)
-		}
-		fmt.Println("Cluster created successfully")
-	}
-
-	// Install runner
-	fmt.Printf("Installing runner '%s'...\n", name)
-	runnerMgr := runner.NewManager(clusterMgr)
-	if err := runnerMgr.Install(ctx, installation); err != nil {
-		return fmt.Errorf("failed to install runner: %w", err)
-	}
-
 	// Save to config
 	if err := configMgr.AddInstallation(installation); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	fmt.Printf("Runner '%s' installed successfully\n", name)
+	fmt.Printf("Runner '%s' added to configuration\n", name)
+	fmt.Println("\nTo deploy this runner, run:")
+	fmt.Println("  deskrun up")
 	return nil
 }

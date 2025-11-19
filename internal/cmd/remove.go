@@ -1,27 +1,23 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"time"
 
-	"github.com/rkoster/deskrun/internal/cluster"
 	"github.com/rkoster/deskrun/internal/config"
-	"github.com/rkoster/deskrun/internal/runner"
-	"github.com/rkoster/deskrun/pkg/types"
 	"github.com/spf13/cobra"
 )
 
 var removeCmd = &cobra.Command{
 	Use:   "remove <name>",
-	Short: "Remove a runner installation",
-	Long: `Remove a GitHub Actions runner installation from the kind cluster.
+	Short: "Remove a runner installation from configuration",
+	Long: `Remove a GitHub Actions runner installation from the deskrun configuration.
 
-This will delete the runner scale set and associated resources from the cluster,
-and remove the installation from the deskrun configuration.
+This is a config-only operation. After removing a runner, you need to run 'deskrun up'
+to apply the changes to the cluster, or use 'deskrun down' to remove all runners.
 
 Example:
   deskrun remove my-runner
+  deskrun up
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: runRemove,
@@ -46,39 +42,15 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("installation not found: %w", err)
 	}
 
-	// Setup cluster manager
-	clusterConfig := &types.ClusterConfig{
-		Name: configMgr.GetConfig().ClusterName,
-	}
-	clusterMgr := cluster.NewManager(clusterConfig)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	// Check if cluster exists
-	exists, err := clusterMgr.Exists(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to check cluster: %w", err)
-	}
-
-	if exists {
-		// Uninstall runner from cluster
-		fmt.Printf("Removing runner '%s' from cluster...\n", name)
-		runnerMgr := runner.NewManager(clusterMgr)
-		if err := runnerMgr.Uninstall(ctx, name); err != nil {
-			fmt.Printf("Warning: failed to remove runner from cluster: %v\n", err)
-		} else {
-			fmt.Println("Runner removed from cluster")
-		}
-	} else {
-		fmt.Println("Cluster does not exist, skipping cluster cleanup")
-	}
-
 	// Remove from config
 	if err := configMgr.RemoveInstallation(name); err != nil {
 		return fmt.Errorf("failed to remove from config: %w", err)
 	}
 
-	fmt.Printf("Runner '%s' removed successfully\n", name)
+	fmt.Printf("Runner '%s' removed from configuration\n", name)
+	fmt.Println("\nTo apply this change to the cluster, run:")
+	fmt.Println("  deskrun up")
+	fmt.Println("\nOr to remove all runners from the cluster, run:")
+	fmt.Println("  deskrun down")
 	return nil
 }
