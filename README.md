@@ -189,11 +189,11 @@ Configuration is stored in `~/.deskrun/config.json`:
 
 The tool automatically:
 - Creates a kind cluster if it doesn't exist
-- Installs the ARC controller and CRDs (Custom Resource Definitions) on first runner installation
-- Deploys runner scale sets with optimized configurations
-- Manages authentication secrets
+- Installs the ARC controller and CRDs (Custom Resource Definitions) on first runner installation using Helm
+- Deploys each runner scale set using Helm with optimized configurations
+- Manages authentication via Helm chart values
 
-**Note**: The first time you add a runner, `deskrun` will automatically install the GitHub Actions Runner Controller using Helm. This may take a minute or two.
+**Note**: The first time you add a runner, `deskrun` will automatically install the GitHub Actions Runner Controller using Helm. This may take a minute or two. Each runner is then deployed as a separate Helm release.
 
 ## Lessons Learned
 
