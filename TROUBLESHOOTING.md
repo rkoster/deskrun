@@ -92,6 +92,28 @@ kubectl delete namespace arc-systems --context kind-deskrun
 kubectl create namespace arc-systems --context kind-deskrun
 ```
 
+#### ARC Controller CRDs missing
+```bash
+# Check if CRDs are installed
+kubectl get crd autoscalingrunnersets.actions.github.com --context kind-deskrun
+
+# If missing, the controller will be automatically installed on first runner add
+# You can also manually install it:
+helm install arc-controller \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --namespace arc-systems \
+  --create-namespace \
+  --kube-context kind-deskrun
+
+# Wait for CRDs to be ready
+kubectl wait --for condition=established \
+  --timeout=60s \
+  crd/autoscalingrunnersets.actions.github.com \
+  --context kind-deskrun
+```
+
+**Note**: The first time you add a runner, `deskrun` automatically installs the GitHub Actions Runner Controller and CRDs. This process may take 1-2 minutes.
+
 ### 3. Runners Not Appearing in GitHub
 
 **Symptom:**

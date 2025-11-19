@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/rkoster/deskrun/internal/cluster"
 	"github.com/rkoster/deskrun/pkg/templates"
@@ -13,9 +14,13 @@ import (
 )
 
 const (
-	defaultNamespace = "arc-systems"
-	helmChartRepo    = "oci://ghcr.io/actions/actions-runner-controller-charts"
-	helmChartName    = "gha-runner-scale-set"
+	defaultNamespace        = "arc-systems"
+	arcControllerNamespace  = "arc-systems"
+	arcControllerRelease    = "arc-controller"
+	arcControllerChartRepo  = "oci://ghcr.io/actions/actions-runner-controller-charts"
+	arcControllerChartName  = "gha-runner-scale-set-controller"
+	runnerScaleSetChartRepo = "oci://ghcr.io/actions/actions-runner-controller-charts"
+	runnerScaleSetChartName = "gha-runner-scale-set"
 )
 
 // Manager handles runner operations
@@ -44,6 +49,11 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 	// Create namespace
 	if err := m.createNamespace(ctx, defaultNamespace); err != nil {
 		return fmt.Errorf("failed to create namespace: %w", err)
+	}
+
+	// Ensure ARC controller is installed
+	if err := m.ensureARCController(ctx); err != nil {
+		return fmt.Errorf("failed to ensure ARC controller: %w", err)
 	}
 
 	// Create temporary directory for manifests
@@ -205,4 +215,59 @@ func containsMiddle(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ensureARCController checks if the ARC controller is installed and installs it if needed
+func (m *Manager) ensureARCController(ctx context.Context) error {
+	// Check if CRDs are already installed
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "crd", "autoscalingrunnersets.actions.github.com",
+		"--context", m.clusterManager.GetKubeconfig())
+	if err := cmd.Run(); err == nil {
+		// CRDs already exist, controller is likely installed
+		return nil
+	}
+
+	// CRDs don't exist, install the controller
+	fmt.Println("Installing GitHub Actions Runner Controller...")
+
+	// Install controller using helm
+	cmd = exec.CommandContext(ctx, "helm", "install", arcControllerRelease,
+		fmt.Sprintf("%s/%s", arcControllerChartRepo, arcControllerChartName),
+		"--namespace", arcControllerNamespace,
+		"--create-namespace",
+		"--kube-context", m.clusterManager.GetKubeconfig(),
+		"--wait")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check if already installed
+		if contains(string(output), "already exists") || contains(string(output), "cannot re-use") {
+			fmt.Println("Controller already installed")
+			return nil
+		}
+		return fmt.Errorf("failed to install ARC controller: %w\nOutput: %s", err, string(output))
+	}
+
+	fmt.Println("ARC controller installed successfully")
+
+	// Wait a moment for CRDs to be ready
+	fmt.Println("Waiting for CRDs to be ready...")
+	for i := 0; i < 30; i++ {
+		cmd = exec.CommandContext(ctx, "kubectl", "wait", "--for", "condition=established",
+			"--timeout=10s", "crd/autoscalingrunnersets.actions.github.com",
+			"--context", m.clusterManager.GetKubeconfig())
+		if err := cmd.Run(); err == nil {
+			fmt.Println("CRDs are ready")
+			return nil
+		}
+		// Wait a bit and retry
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+			// Continue to next iteration
+		}
+	}
+
+	return fmt.Errorf("timeout waiting for CRDs to be ready")
 }
