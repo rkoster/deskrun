@@ -120,23 +120,18 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 
 	// Load the chart from OCI registry
 	chartPath := fmt.Sprintf("%s/%s", runnerScaleSetChartRepo, runnerScaleSetChartName)
-	chartRef, err := loader.Load(chartPath)
+
+	// For OCI charts, we need to use the registry client to pull
+	// Since the chart is in OCI format, we pull it directly using the install client
+	// which will handle OCI pulling internally when we set the repository URL
+	chartRef, err := client.ChartPathOptions.LocateChart(chartPath, cli.New())
 	if err != nil {
-		// For OCI charts, we need to pull them first
-		pullClient := action.NewPullWithOpts(action.WithConfig(actionConfig))
-		pullClient.DestDir = tmpDir
+		return fmt.Errorf("failed to locate chart: %w", err)
+	}
 
-		_, err = pullClient.Run(chartPath)
-		if err != nil {
-			return fmt.Errorf("failed to pull chart: %w", err)
-		}
-
-		// Try loading from pulled chart
-		pulledChartPath := filepath.Join(tmpDir, runnerScaleSetChartName)
-		chartRef, err = loader.Load(pulledChartPath)
-		if err != nil {
-			return fmt.Errorf("failed to load chart: %w", err)
-		}
+	chart, err := loader.Load(chartRef)
+	if err != nil {
+		return fmt.Errorf("failed to load chart: %w", err)
 	}
 
 	// Load values from file
@@ -148,7 +143,7 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 		}
 	}
 
-	_, err = client.Run(chartRef, vals)
+	_, err = client.Run(chart, vals)
 	if err != nil {
 		return fmt.Errorf("failed to install runner scale set: %w", err)
 	}
@@ -421,32 +416,20 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	client.Wait = true
 	client.Timeout = 5 * time.Minute
 
-	// Create temporary directory for chart download
-	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-arc-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Pull the chart from OCI registry
+	// Locate and load the chart from OCI registry
 	chartPath := fmt.Sprintf("%s/%s", arcControllerChartRepo, arcControllerChartName)
-	pullClient := action.NewPullWithOpts(action.WithConfig(actionConfig))
-	pullClient.DestDir = tmpDir
-
-	_, err = pullClient.Run(chartPath)
+	chartRef, err := client.ChartPathOptions.LocateChart(chartPath, cli.New())
 	if err != nil {
-		return fmt.Errorf("failed to pull chart: %w", err)
+		return fmt.Errorf("failed to locate chart: %w", err)
 	}
 
-	// Load the chart
-	pulledChartPath := filepath.Join(tmpDir, arcControllerChartName)
-	chartRef, err := loader.Load(pulledChartPath)
+	chart, err := loader.Load(chartRef)
 	if err != nil {
 		return fmt.Errorf("failed to load chart: %w", err)
 	}
 
 	// Install with empty values
-	_, err = client.Run(chartRef, nil)
+	_, err = client.Run(chart, nil)
 	if err != nil {
 		// Check if already installed
 		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "cannot re-use") {
