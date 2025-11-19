@@ -12,6 +12,11 @@ import (
 	"github.com/rkoster/deskrun/internal/cluster"
 	"github.com/rkoster/deskrun/pkg/templates"
 	"github.com/rkoster/deskrun/pkg/types"
+	"gopkg.in/yaml.v3"
+	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/registry"
 )
 
 const (
@@ -34,6 +39,28 @@ func NewManager(clusterManager *cluster.Manager) *Manager {
 	return &Manager{
 		clusterManager: clusterManager,
 	}
+}
+
+// getHelmConfig creates a Helm action configuration
+func (m *Manager) getHelmConfig(namespace string) (*action.Configuration, error) {
+	settings := cli.New()
+	settings.KubeContext = m.clusterManager.GetKubeconfig()
+
+	actionConfig := new(action.Configuration)
+	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, "", func(format string, v ...interface{}) {
+		// Suppress Helm's default logger
+	}); err != nil {
+		return nil, err
+	}
+
+	// Configure registry client for OCI
+	registryClient, err := registry.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registry client: %w", err)
+	}
+	actionConfig.RegistryClient = registryClient
+
+	return actionConfig, nil
 }
 
 // Install installs a runner scale set
@@ -78,21 +105,52 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 		return fmt.Errorf("failed to write helm values: %w", err)
 	}
 
-	// Install using Helm
-	cmd := exec.CommandContext(ctx, "helm", "install", installation.Name,
-		fmt.Sprintf("%s/%s", runnerScaleSetChartRepo, runnerScaleSetChartName),
-		"--namespace", defaultNamespace,
-		"--values", valuesPath,
-		"--kube-context", m.clusterManager.GetKubeconfig(),
-		"--wait")
-
-	output, err := cmd.CombinedOutput()
+	// Install using Helm SDK
+	actionConfig, err := m.getHelmConfig(defaultNamespace)
 	if err != nil {
-		// Check if already installed
-		if contains(string(output), "already exists") || contains(string(output), "cannot re-use") {
-			return fmt.Errorf("runner %s already exists, please remove it first: %w\nOutput: %s", installation.Name, err, string(output))
+		return fmt.Errorf("failed to create helm config: %w", err)
+	}
+
+	client := action.NewInstall(actionConfig)
+	client.ReleaseName = installation.Name
+	client.Namespace = defaultNamespace
+	client.Wait = true
+	client.Timeout = 5 * time.Minute
+	client.CreateNamespace = false // We create it separately
+
+	// Load the chart from OCI registry
+	chartPath := fmt.Sprintf("%s/%s", runnerScaleSetChartRepo, runnerScaleSetChartName)
+	chartRef, err := loader.Load(chartPath)
+	if err != nil {
+		// For OCI charts, we need to pull them first
+		pullClient := action.NewPullWithOpts(action.WithConfig(actionConfig))
+		pullClient.DestDir = tmpDir
+
+		_, err = pullClient.Run(chartPath)
+		if err != nil {
+			return fmt.Errorf("failed to pull chart: %w", err)
 		}
-		return fmt.Errorf("failed to install runner scale set: %w\nOutput: %s", err, string(output))
+
+		// Try loading from pulled chart
+		pulledChartPath := filepath.Join(tmpDir, runnerScaleSetChartName)
+		chartRef, err = loader.Load(pulledChartPath)
+		if err != nil {
+			return fmt.Errorf("failed to load chart: %w", err)
+		}
+	}
+
+	// Load values from file
+	vals := map[string]interface{}{}
+	if valuesContent, err := os.ReadFile(valuesPath); err == nil {
+		// Parse YAML values
+		if err := yaml.Unmarshal(valuesContent, &vals); err != nil {
+			return fmt.Errorf("failed to parse values: %w", err)
+		}
+	}
+
+	_, err = client.Run(chartRef, vals)
+	if err != nil {
+		return fmt.Errorf("failed to install runner scale set: %w", err)
 	}
 
 	fmt.Println("Runner scale set installed successfully")
@@ -101,18 +159,18 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 
 // Uninstall removes a runner scale set
 func (m *Manager) Uninstall(ctx context.Context, name string) error {
-	// Uninstall using Helm
-	cmd := exec.CommandContext(ctx, "helm", "uninstall", name,
-		"--namespace", defaultNamespace,
-		"--kube-context", m.clusterManager.GetKubeconfig())
-
-	output, err := cmd.CombinedOutput()
+	// Uninstall using Helm SDK
+	actionConfig, err := m.getHelmConfig(defaultNamespace)
 	if err != nil {
-		// Check if already uninstalled
-		if contains(string(output), "not found") || contains(string(output), "no release found") {
-			return fmt.Errorf("runner %s not found: %w\nOutput: %s", name, err, string(output))
-		}
-		return fmt.Errorf("failed to uninstall runner: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to create helm config: %w", err)
+	}
+
+	client := action.NewUninstall(actionConfig)
+	client.Timeout = 2 * time.Minute
+
+	_, err = client.Run(name)
+	if err != nil {
+		return fmt.Errorf("failed to uninstall runner: %w", err)
 	}
 
 	return nil
@@ -120,30 +178,24 @@ func (m *Manager) Uninstall(ctx context.Context, name string) error {
 
 // List returns all runner scale sets
 func (m *Manager) List(ctx context.Context) ([]string, error) {
-	// List Helm releases in the namespace
-	cmd := exec.CommandContext(ctx, "helm", "list",
-		"--namespace", defaultNamespace,
-		"--kube-context", m.clusterManager.GetKubeconfig(),
-		"--short")
+	// List Helm releases using SDK
+	actionConfig, err := m.getHelmConfig(defaultNamespace)
+	if err != nil {
+		return []string{}, nil // Return empty list if config fails
+	}
 
-	output, err := cmd.Output()
+	client := action.NewList(actionConfig)
+	releases, err := client.Run()
 	if err != nil {
 		// If namespace doesn't exist or no releases, return empty list
 		return []string{}, nil
 	}
 
-	if len(output) == 0 {
-		return []string{}, nil
-	}
-
-	// Parse output - names are line-separated
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	names := []string{}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && line != arcControllerRelease {
-			// Exclude the ARC controller from the list
-			names = append(names, line)
+	for _, release := range releases {
+		// Exclude the ARC controller from the list
+		if release.Name != arcControllerRelease {
+			names = append(names, release.Name)
 		}
 	}
 
@@ -152,28 +204,33 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 
 // Status returns the status of a runner installation
 func (m *Manager) Status(ctx context.Context, name string) (string, error) {
-	// Get Helm release status
-	cmd := exec.CommandContext(ctx, "helm", "status", name,
-		"--namespace", defaultNamespace,
-		"--kube-context", m.clusterManager.GetKubeconfig())
+	// Get Helm release status using SDK
+	actionConfig, err := m.getHelmConfig(defaultNamespace)
+	if err != nil {
+		return "", fmt.Errorf("failed to create helm config: %w", err)
+	}
 
-	output, err := cmd.Output()
+	client := action.NewStatus(actionConfig)
+	release, err := client.Run(name)
 	if err != nil {
 		return "", fmt.Errorf("failed to get status: %w", err)
 	}
 
+	statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nSTATUS: %s\nREVISION: %d\n",
+		release.Name, release.Namespace, release.Info.Status, release.Version)
+
 	// Also get the AutoscalingRunnerSet status
-	cmd = exec.CommandContext(ctx, "kubectl", "get", "autoscalingrunnersets", name,
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "autoscalingrunnersets", name,
 		"-n", defaultNamespace, "--context", m.clusterManager.GetKubeconfig(),
 		"-o", "wide")
 
 	k8sOutput, err := cmd.Output()
 	if err != nil {
 		// Just show Helm status if kubectl fails
-		return string(output), nil
+		return statusStr, nil
 	}
 
-	return fmt.Sprintf("%s\n\nKubernetes Resources:\n%s", string(output), string(k8sOutput)), nil
+	return fmt.Sprintf("%s\nKubernetes Resources:\n%s", statusStr, string(k8sOutput)), nil
 }
 
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
@@ -351,22 +408,52 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	// CRDs don't exist, install the controller
 	fmt.Println("Installing GitHub Actions Runner Controller...")
 
-	// Install controller using helm
-	cmd = exec.CommandContext(ctx, "helm", "install", arcControllerRelease,
-		fmt.Sprintf("%s/%s", arcControllerChartRepo, arcControllerChartName),
-		"--namespace", arcControllerNamespace,
-		"--create-namespace",
-		"--kube-context", m.clusterManager.GetKubeconfig(),
-		"--wait")
+	// Install controller using Helm SDK
+	actionConfig, err := m.getHelmConfig(arcControllerNamespace)
+	if err != nil {
+		return fmt.Errorf("failed to create helm config: %w", err)
+	}
 
-	output, err := cmd.CombinedOutput()
+	client := action.NewInstall(actionConfig)
+	client.ReleaseName = arcControllerRelease
+	client.Namespace = arcControllerNamespace
+	client.CreateNamespace = true
+	client.Wait = true
+	client.Timeout = 5 * time.Minute
+
+	// Create temporary directory for chart download
+	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-arc-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Pull the chart from OCI registry
+	chartPath := fmt.Sprintf("%s/%s", arcControllerChartRepo, arcControllerChartName)
+	pullClient := action.NewPullWithOpts(action.WithConfig(actionConfig))
+	pullClient.DestDir = tmpDir
+
+	_, err = pullClient.Run(chartPath)
+	if err != nil {
+		return fmt.Errorf("failed to pull chart: %w", err)
+	}
+
+	// Load the chart
+	pulledChartPath := filepath.Join(tmpDir, arcControllerChartName)
+	chartRef, err := loader.Load(pulledChartPath)
+	if err != nil {
+		return fmt.Errorf("failed to load chart: %w", err)
+	}
+
+	// Install with empty values
+	_, err = client.Run(chartRef, nil)
 	if err != nil {
 		// Check if already installed
-		if contains(string(output), "already exists") || contains(string(output), "cannot re-use") {
+		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "cannot re-use") {
 			fmt.Println("Controller already installed")
 			return nil
 		}
-		return fmt.Errorf("failed to install ARC controller: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to install ARC controller: %w", err)
 	}
 
 	fmt.Println("ARC controller installed successfully")
