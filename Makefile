@@ -1,8 +1,22 @@
-.PHONY: build test clean install lint fmt
+.PHONY: build test clean install lint fmt help
 
 # Binary name
 BINARY_NAME=deskrun
 INSTALL_PATH=/usr/local/bin
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  build       - Build the binary"
+	@echo "  build-all   - Build for multiple platforms"
+	@echo "  test        - Run tests"
+	@echo "  clean       - Clean build artifacts"
+	@echo "  install     - Install the binary"
+	@echo "  fmt         - Format code"
+	@echo "  lint        - Run linter"
+	@echo "  check       - Run linter and tests"
+	@echo "  dev         - Build and run the binary"
+	@echo "  help        - Show this help message"
 
 # Build the binary
 build:
