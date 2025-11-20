@@ -468,6 +468,25 @@ deskrun add your-runner \
 
 ## Known Limitations
 
+### GitHub Job Routing with ARC Ephemeral Runners
+
+**Limitation**: Workflows using `runs-on: [self-hosted]` or other label-based selectors will NOT match ARC ephemeral runners.
+
+**Why**: GitHub explicitly does not support assigning labels to runner scale sets. This is a deliberate architectural decision, not a bug.
+
+**Details**: See [GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md) for complete analysis.
+
+**Impact**: 
+- Standard GitHub Actions workflows that expect `runs-on: [self-hosted]` runners cannot use ARC ephemeral runners
+- Custom label-based routing (e.g., `runs-on: [my-custom-label]`) does not work with ARC
+
+**Workarounds**:
+- Use GitHub Enterprise with runner groups (if available)
+- Deploy traditional self-hosted runners instead of ephemeral runners
+- Use GitHub-hosted runners for workflows that require label-based routing
+
+**Status**: This limitation exists in ARC v0.13.0 and is not expected to change in the near term, as it's a GitHub API design decision.
+
 1. **Single Cluster**: deskrun manages one kind cluster at a time
 2. **Local Only**: Designed for local development, not production
 3. **No Cluster Upgrades**: To upgrade kind, delete and recreate cluster

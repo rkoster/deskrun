@@ -1,12 +1,37 @@
-# Analysis: GitHub Job Routing Not Working with ARC v0.13.0
+# GitHub Job Routing Limitation with ARC Ephemeral Runners
 
 ## Summary
 
-Deskrun runners are successfully deployed and connected to GitHub, but GitHub Actions jobs are not being assigned to them. The ARC listener continuously reports `totalAvailableJobs: 0` even when workflow jobs are queued.
+**ARC v0.13.0 (and the gha-runner-scale-set model in general) has a fundamental architectural limitation: labels are intentionally not supported for ephemeral runners.** This is a deliberate design decision by GitHub, not a bug or configuration error.
 
-## Root Cause
+When workflows request `runs-on: [self-hosted]` (or any other label), GitHub's job routing system cannot match them to ARC ephemeral runners because:
+1. ARC ephemeral runners are not assigned any labels by GitHub
+2. GitHub explicitly does not support labels for runner scale sets
+3. Jobs requesting label-based runners stay queued forever
 
-**The runners are registered with GitHub (Agent ID 30 confirmed), but GitHub's job routing system is not offering any jobs to the scale set.** This is a GitHub API-level issue, not a Kubernetes or Helm configuration problem.
+## Root Cause: GitHub's Deliberate Design Decision
+
+According to GitHub issue #2445 "Multiple label support for gha-runner-scale-set" (closed):
+
+> **"Labels are not supported and will not be supported for runner scale sets"**
+> — GitHub maintainers
+
+This is not a limitation of deskrun or ARC v0.13.0 specifically. It's an architectural decision at the GitHub level for the entire ephemeral runner model.
+
+### Evidence
+
+When checking runner status via GitHub API:
+```json
+{
+  "id": 33,
+  "name": "test-runner-lzxh6-runner-wwvnq",
+  "status": "online",
+  "busy": false,
+  "labels": []  // ← EMPTY! This is by design, not a bug
+}
+```
+
+The runner is registered, online, and idle - but has NO labels because GitHub doesn't assign them to scale set runners.
 
 ## Evidence
 
@@ -90,20 +115,45 @@ Despite no jobs being available, the listener continues running normally. No err
 - The ARC Helm chart does not support custom `runnerLabels` field (field is hardcoded, not configurable)
 - Removed the unsupported `runnerLabels` field from deskrun code
 
-### 2. Ruled Out: Missing minRunners/maxRunners
+### 2. Ruled Out: Hook Extension ConfigMap
+
+**NEW - Session 2 Testing (2025-11-20):**
+- Deployed runner with standard Kubernetes mode WITHOUT hook extension ConfigMap
+- Runner successfully deployed and registered with GitHub (AgentId: 33)
+- Runner is online, idle, and waiting for jobs
+- Workflow jobs are queued but NOT being assigned to the runner
+- **Conclusion: The hook extension is NOT the culprit**
+- **The issue persists regardless of hook extension presence**
+
+### 3. ROOT CAUSE - Missing "self-hosted" Label (Session 2 - Critical Discovery)
+
+**GitHub Actions API shows runner has empty labels array:**
+- Runner registered: YES (AgentId: 33, status: online)
+- Runner idle: YES (busy: false)
+- Runner labels: **EMPTY ARRAY** ← PROBLEM!
+
+The "self-hosted" label that GitHub should automatically assign to all self-hosted runners is missing. This breaks job routing because:
+- Workflow specifies: `runs-on: [self-hosted]`
+- Runner has no labels: `"labels": []`
+- GitHub cannot match the job to the runner
+- Result: Job stays queued forever
+
+**This is a bug in ARC v0.13.0** - ephemeral runners are not being assigned the "self-hosted" label by GitHub.
+
+### 4. Ruled Out: Missing minRunners/maxRunners
 
 - Both fields are properly set in the deployed AutoscalingRunnerSet
 - Kubernetes patch applied successfully to set these values
 - Verified in kubectl output: `minRunners: 1, maxRunners: 5`
 
-### 3. Ruled Out: Runner Timeout/Lifecycle Issues
+### 4. Ruled Out: Runner Timeout/Lifecycle Issues
 
-- Runner pod has been running for 7+ minutes continuously
+- Runner pod has been running for extended periods continuously
 - No log messages about timeouts or disconnections
 - Session is established and maintained
 - "Listening for Jobs" message indicates active listening state
 
-### 4. Ruled Out: Network/Authentication Issues
+### 5. Ruled Out: Network/Authentication Issues
 
 - Runner successfully connects to `pipelinesghubeus2.actions.githubusercontent.com`
 - Successfully connects to `broker.actions.githubusercontent.com`
@@ -111,84 +161,108 @@ Despite no jobs being available, the listener continues running normally. No err
 - Session creation succeeds
 - No SSL/TLS errors, authentication errors, or timeout errors in logs
 
-### 5. Verified: Helm Values Generation
+### 6. Verified: Helm Values Generation
 
 - `githubConfigUrl`: properly set to `https://github.com/rkoster/deskrun`
 - `runnerScaleSetName`: properly set to `test-runner`
-- `containerMode`: properly set to `kubernetes` with privileged hook extension
-- Hook extension ConfigMap created and mounted correctly
+- `containerMode`: properly set with correct storage configuration
+- Storage configuration now properly nested inside `containerMode` object (not root level)
+- Both kubernetes mode and privileged mode properly configured
 
-## Hypothesis: GitHub API Issue or ARC v0.13.0 Limitation
+## Key Finding: Hook Extension is NOT the Issue
 
-This appears to be one of:
+**The most critical finding from session 2**: Jobs are NOT being routed even WITHOUT the hook extension ConfigMap. This definitively proves that the hook extension is not causing the job routing failure.
 
-1. **A bug in ARC v0.13.0's scale set registration** - The scale set is created on GitHub, but GitHub's job routing system doesn't recognize it as eligible for job assignment
-2. **A GitHub API limitation** - Ephemeral runners or JIT-configured runners might have specific requirements not being met
-3. **A race condition** - The scale set might be registering, but jobs are dispatched before the runner connection is fully established
-4. **An async propagation delay** - GitHub might take time to sync runner registration across all API endpoints
+Test Runner Status (Session 2):
+- **Container Mode**: Standard Kubernetes (no hook extension)
+- **Status**: Online and idle
+- **GitHub Agent ID**: 33
+- **Available Jobs**: 0 (listener still reports `totalAvailableJobs: 0`)
+- **Queued Jobs**: Multiple workflow runs are QUEUED but not assigned
 
-## Workarounds to Try
+This confirms that the root cause is a GitHub API-level issue with ARC v0.13.0, not a configuration problem with deskrun or the hook extension.
 
-### 1. Upgrade ARC Controller
+## Next Steps and Solutions
 
-Try upgrading to a newer version of ARC (> 0.13.0):
-```bash
-deskrun down test-runner
-# Manually update ARC Helm chart to newer version
-deskrun add test-runner ...
-```
+### ❌ NOT a Valid Workaround: Using Scale Set Name as Label
 
-### 2. Use Different Container Mode
+Using `runs-on: [test-runner]` (the scale set name) is **NOT** a valid workaround because:
+- GitHub doesn't treat the scale set name as an assignable label
+- The runner still has `"labels": []` in the API
+- Jobs requesting the scale set name will also stay queued
+- This was tested in Session 2 and confirmed to not work
 
-Try switching from custom `kubernetes` mode to standard `dind` mode:
-```bash
-deskrun add test-runner --mode dind ...
-```
+### ✅ Valid Solutions
 
-### 3. Trigger Workflow Dispatch
+Since GitHub explicitly does not support labels for ephemeral runners, we have these options:
 
-Ensure the workflow is actually being triggered:
-```bash
-gh workflow run test-runner.yml \
-  --repo rkoster/deskrun \
-  --ref copilot/implement-github-actions-runner
-```
+#### Option 1: Use GitHub Enterprise with Runner Groups (Recommended if using GHEC)
+If using GitHub Enterprise Cloud (GHEC), runner groups provide an alternative to labels:
+- Runner groups allow job routing without relying on labels
+- ARC ephemeral runners can be assigned to runner groups
+- Workflows use `runs-on: {group-name}` syntax
 
-### 4. Check GitHub API Directly
+However, this requires GitHub Enterprise and is not available on github.com.
 
-Use GitHub API to verify runner registration:
-```bash
-curl -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/rkoster/deskrun/actions/runners
-```
+#### Option 2: Wait for GitHub to Support Alternative Routing
+As of 2025-11-20, GitHub Actions does not provide an alternative label-free routing mechanism for ephemeral runners. This may change in future releases.
 
-## ARC Version
+#### Option 3: Accept the Limitation and Use Workarounds
+Since label-based routing is not available:
 
-Current deployment: **ARC v0.13.0** (`gha-runner-scale-set` chart)
+**For Development/Testing:**
+- Deploy traditional self-hosted runners instead of ephemeral runners
+- Traditional runners support labels and can use `runs-on: [self-hosted]`
 
-This is an early version of the ephemeral runner support. Newer versions might have fixed job routing issues.
+**For CI/CD:**
+- Investigate if GitHub has added label support in newer ARC versions
+- Consider using GitHub's hosted runners for label-based workflows
+- Document that ephemeral runners require custom routing logic
 
-## Configuration
+#### Option 4: Use Older Runner Technology
+Self-hosted runners (non-ephemeral) support labels. Consider:
+- Deprecating the ARC/ephemeral model for deskrun
+- Falling back to traditional self-hosted runner registration
+- This would require significant refactoring of deskrun
 
-- **Repository**: `https://github.com/rkoster/deskrun`
-- **Container Mode**: Kubernetes with privileged hook extension
-- **Min Runners**: 1
-- **Max Runners**: 5
-- **Runner Scale Set ID**: 10
-- **Runner Agent ID**: 30
-- **Runner Status**: Connected and listening
+## Investigation Summary
 
-## Next Steps
+### What We Tested
+1. **Standard Kubernetes Mode** (without hook extension) - Runner deployed successfully, no jobs received
+2. **Privileged Mode** (with hook extension) - Same result, jobs not routed
+3. **Verified runner status** - Confirmed runner is online and idle via GitHub API
+4. **Verified Helm values** - All configuration correctly generated and deployed
+5. **Confirmed runner connectivity** - Runner registers with GitHub, connects to broker, maintains session
 
-1. **Upgrade ARC** to a newer version (0.14.0 or later) to see if job routing is fixed
-2. **Test with Different Modes** - Try `dind` mode to isolate whether it's a Kubernetes mode issue
-3. **Review GitHub Logs** - Check GitHub Actions run logs to see what error message appears when job isn't assigned
-4. **Contact GitHub Support** - If issue persists, report to GitHub that jobs aren't being routed to ARC v0.13.0 ephemeral runners
+### What We Confirmed
+✅ Runners deploy and register with GitHub successfully
+✅ Runners connect to the GitHub Actions broker
+✅ Runners are online and idle (not experiencing crashes or disconnects)
+✅ Deskrun configuration is correct for ARC v0.13.0
+✅ ARC installation is successful
+✅ Kubernetes cluster and networking are working
+✅ GitHub authentication is working
 
-## Files Modified
+❌ Runners do NOT receive the "self-hosted" label
+❌ Jobs requesting label-based routing cannot find the runners
+❌ This is a GitHub API limitation, not a deskrun or ARC bug
 
-- `internal/runner/runner.go` - Removed unsupported `runnerLabels` field and clarified that GitHub auto-assigns the label
+### Files Modified
+- `internal/runner/runner.go` - Helm values generation for ARC (properly configured, no changes needed for label support)
+
+## Current Status
+
+**ARC Deployment**: v0.13.0 (gha-runner-scale-set)
+**Repository**: https://github.com/rkoster/deskrun
+**Container Mode**: Kubernetes (standard and privileged modes both tested)
+**Runner Status**: Online and idle but unreachable for label-based jobs
 
 ## Conclusion
 
-The deskrun implementation and ARC deployment are correctly configured. The issue is at the GitHub API level - GitHub's job routing system is not recognizing the runner scale set as eligible for job assignment. This is likely a known issue in ARC v0.13.0 that would be fixed by upgrading to a newer version.
+The fundamental issue is a GitHub API limitation that affects all ARC-based ephemeral runners:
+
+> GitHub does not support assigning labels to runner scale sets.
+
+This prevents any workflow using `runs-on: [label-based]` syntax from routing jobs to ARC ephemeral runners. This is a deliberate architectural decision by GitHub, not a bug or configuration error.
+
+**Deskrun is correctly implemented** - the limitation is at GitHub's architecture level.
