@@ -65,7 +65,7 @@ dev: build
 	./$(BINARY_NAME)
 
 # Update runner with Nix and Docker caching for this repository
-runner-update: build
+runner-update:
 	@echo "Updating runner '$(RUNNER_NAME)' for repository '$(GITHUB_REPO)'..."
 	@echo "Configuration:"
 	@echo "  Runner name: $(RUNNER_NAME)"
@@ -77,7 +77,10 @@ runner-update: build
 	echo "Step 1: Bringing down existing runner..." && \
 	go run ./cmd/deskrun down $(RUNNER_NAME) || true && \
 	echo "" && \
-	echo "Step 2: Adding updated runner configuration..." && \
+	echo "Step 2: Removing old configuration..." && \
+	go run ./cmd/deskrun remove $(RUNNER_NAME) || true && \
+	echo "" && \
+	echo "Step 3: Adding updated runner configuration..." && \
 	go run ./cmd/deskrun add $(RUNNER_NAME) \
 		--repository https://github.com/$(GITHUB_REPO) \
 		--mode cached-privileged-kubernetes \
@@ -86,7 +89,7 @@ runner-update: build
 		--auth-type pat \
 		--auth-value $$GITHUB_TOKEN && \
 	echo "" && \
-	echo "Step 3: Deploying updated runner..." && \
+	echo "Step 4: Deploying updated runner..." && \
 	go run ./cmd/deskrun up && \
 	echo "" && \
 	echo "Runner updated successfully!"
