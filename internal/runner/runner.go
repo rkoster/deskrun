@@ -590,9 +590,9 @@ data:
 
 	// Add cache path volume mounts
 	if len(installation.CachePaths) > 0 {
-		for _, path := range installation.CachePaths {
-			hookExtension += fmt.Sprintf("\n        - name: cache-%s\n          mountPath: %s",
-				sanitizeVolumeName(path.MountPath), path.MountPath)
+		for i := range installation.CachePaths {
+			hookExtension += fmt.Sprintf("\n        - name: cache-%d\n          mountPath: %s",
+				i, installation.CachePaths[i].MountPath)
 		}
 	}
 
@@ -636,8 +636,8 @@ data:
 					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
 				}
 			}
-			hookExtension += fmt.Sprintf("\n      - name: cache-%s\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
-				sanitizeVolumeName(path.MountPath), hostPath)
+			hookExtension += fmt.Sprintf("\n      - name: cache-%d\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
+				i, hostPath)
 		}
 	}
 
