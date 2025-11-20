@@ -54,6 +54,7 @@ jobs:
           # Start dockerd in the background with custom socket path
           dockerd \
               --host=unix:///tmp/dind/docker.sock \
+              --config-file=/etc/docker/daemon.json \
               --data-root=/var/lib/docker \
               --log-level=error \
               >/var/log/dockerd.log 2>&1 &
