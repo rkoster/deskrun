@@ -9,10 +9,10 @@ import (
 
 func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 	tests := []struct {
-		name        string
-		installation *types.RunnerInstallation
-		instanceNum int
-		wantContains string
+		name            string
+		installation    *types.RunnerInstallation
+		instanceNum     int
+		wantContains    string
 		wantNotContains string
 	}{
 		{
@@ -27,7 +27,7 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 				AuthType:      types.AuthTypePAT,
 				AuthValue:     "test-token",
 			},
-			instanceNum: 0,
+			instanceNum:     0,
 			wantNotContains: "runnerGroup:",
 		},
 		{
@@ -42,7 +42,7 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 				AuthType:      types.AuthTypePAT,
 				AuthValue:     "test-token",
 			},
-			instanceNum: 1,
+			instanceNum:  1,
 			wantContains: `runnerGroup: "test-runner"`,
 		},
 		{
@@ -57,7 +57,7 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 				AuthType:      types.AuthTypePAT,
 				AuthValue:     "test-token",
 			},
-			instanceNum: 3,
+			instanceNum:  3,
 			wantContains: `runnerGroup: "my-runner"`,
 		},
 	}
@@ -65,7 +65,11 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Manager{}
-			got, err := m.generateHelmValues(tt.installation, tt.instanceNum)
+			instanceName := tt.installation.Name
+			if tt.instanceNum > 0 {
+				instanceName = tt.installation.Name + "-" + string(rune('0'+tt.instanceNum))
+			}
+			got, err := m.generateHelmValues(tt.installation, instanceName, tt.instanceNum)
 			if err != nil {
 				t.Fatalf("generateHelmValues() error = %v", err)
 			}
@@ -94,11 +98,12 @@ func TestGenerateHelmValues_AllInstancesSameGroup(t *testing.T) {
 	}
 
 	m := &Manager{}
-	
+
 	// Generate values for all instances
 	var values []string
 	for i := 1; i <= installation.Instances; i++ {
-		val, err := m.generateHelmValues(installation, i)
+		instanceName := installation.Name + "-" + string(rune('0'+i))
+		val, err := m.generateHelmValues(installation, instanceName, i)
 		if err != nil {
 			t.Fatalf("generateHelmValues() instance %d error = %v", i, err)
 		}

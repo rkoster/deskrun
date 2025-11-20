@@ -119,6 +119,23 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 
 	fmt.Printf("  Installing runner scale set '%s'...\n", instanceName)
 
+	// For privileged container mode, generate and apply the hook extension ConfigMap
+	if installation.ContainerMode == types.ContainerModePrivileged {
+		fmt.Printf("  Applying hook extension ConfigMap for privileged mode...\n")
+		hookExtension := m.generateHookExtensionConfigMap(installation, instanceName)
+		hookExtensionPath := filepath.Join(tmpDir, "hook-extension.yaml")
+		if err := os.WriteFile(hookExtensionPath, []byte(hookExtension), 0644); err != nil {
+			return fmt.Errorf("failed to write hook extension: %w", err)
+		}
+
+		// Apply the ConfigMap using kubectl
+		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", hookExtensionPath,
+			"--context", m.clusterManager.GetKubeconfig())
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to apply hook extension ConfigMap: %w", err)
+		}
+	}
+
 	// Prepare Helm values with instance-specific cache paths
 	valuesPath := filepath.Join(tmpDir, "values.yaml")
 	valuesContent, err := m.generateHelmValues(installation, instanceName, instanceNum)
@@ -337,9 +354,11 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 	}
 
 	// For repository-level runners, use the default runner group
-	// Custom runner groups are primarily an organization-level feature
+	// For multi-instance setups, all instances share the same base runner group
 	runnerGroupConfig := ""
-	// Note: Removed custom runner group logic to use GitHub's default group
+	if installation.Instances > 1 {
+		runnerGroupConfig = fmt.Sprintf(`runnerGroup: "%s"`, installation.Name)
+	}
 
 	// Add runner labels so workflows can target these runners
 	// Use the instance name to ensure unique ServiceAccount names across instances
@@ -360,55 +379,58 @@ maxRunners: %d
 	return values, nil
 }
 
-// generatePrivilegedContainerMode generates the privileged container mode configuration
+// generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
+// using ARC's hook extension pattern to inject privileged context into job containers only
 func (m *Manager) generatePrivilegedContainerMode(installation *types.RunnerInstallation, instanceNum int) string {
 	config := `containerMode:
   type: "kubernetes"
 template:
   spec:
     securityContext:
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
+      runAsUser: 1001
+      runAsGroup: 1001
+      fsGroup: 1001
     containers:
     - name: runner
       securityContext:
-        privileged: true
-        runAsUser: 0
-        runAsGroup: 0
-        allowPrivilegeEscalation: true
+        allowPrivilegeEscalation: false
         readOnlyRootFilesystem: false
-        capabilities:
-          add:
-            - SYS_ADMIN
-            - NET_ADMIN
-            - SYS_PTRACE
-            - SYS_CHROOT
-            - SETFCAP
-            - SETPCAP
-            - NET_RAW
-            - IPC_LOCK
-            - SYS_RESOURCE
-            - MKNOD
-            - AUDIT_WRITE
-            - AUDIT_CONTROL
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
       env:
-      - name: SYSTEMD_IGNORE_CHROOT
-        value: "1"`
+      - name: ACTIONS_RUNNER_CONTAINER_HOOKS
+        value: "/home/runner/k8s/index.js"
+      - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+        value: "/etc/hooks/hook-extension.yaml"
+      - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+        value: "false"`
 
-	// Add volume mounts if cache paths are specified
+	// Add volume mounts for work directory and cache paths
+	config += "\n      volumeMounts:"
+	config += "\n      - name: work"
+	config += "\n        mountPath: /home/runner/_work"
+	config += "\n      - name: hook-extension"
+	config += "\n        mountPath: /etc/hooks"
+	config += "\n        readOnly: true"
+
 	if len(installation.CachePaths) > 0 {
-		config += "\n      volumeMounts:"
-		config += "\n      - name: work"
-		config += "\n        mountPath: /home/runner/_work"
 		for i, path := range installation.CachePaths {
 			config += fmt.Sprintf("\n      - name: cache-%d", i)
 			config += fmt.Sprintf("\n        mountPath: %s", path.MountPath)
 		}
+	}
 
-		config += "\n    volumes:"
-		config += "\n    - name: work"
-		config += "\n      emptyDir: {}"
+	// Define volumes
+	config += "\n    volumes:"
+	config += "\n    - name: work"
+	config += "\n      emptyDir: {}"
+	config += "\n    - name: hook-extension"
+	config += "\n      configMap:"
+	config += "\n        name: privileged-hook-extension"
+	config += "\n        defaultMode: 0755"
+
+	if len(installation.CachePaths) > 0 {
 		for i, path := range installation.CachePaths {
 			hostPath := path.HostPath
 			if hostPath == "" {
@@ -429,7 +451,119 @@ template:
 	return config
 }
 
-// ensureARCController checks if the ARC controller is installed and installs it if needed
+// generateHookExtensionConfigMap generates the hook extension ConfigMap YAML for privileged container mode
+// This ConfigMap contains the PodSpec patch that ARC applies to job containers
+func (m *Manager) generateHookExtensionConfigMap(installation *types.RunnerInstallation, instanceName string) string {
+	// Build the PodSpec patch that will be applied to job containers
+	// This patch adds privileged context and capabilities only to job containers
+	hookExtension := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: privileged-hook-extension
+  namespace: ` + defaultNamespace + `
+data:
+  hook-extension.yaml: |
+    version: 1
+    container:
+      image: "{{ $.job.container.image }}"
+      securityContext:
+        privileged: true
+        runAsUser: 0
+        runAsGroup: 0
+        allowPrivilegeEscalation: true
+        capabilities:
+          add:
+            - SYS_ADMIN
+            - NET_ADMIN
+            - SYS_PTRACE
+            - SYS_CHROOT
+            - SETFCAP
+            - SETPCAP
+            - NET_RAW
+            - IPC_LOCK
+            - SYS_RESOURCE
+            - MKNOD
+            - AUDIT_WRITE
+            - AUDIT_CONTROL
+      volumeMounts:
+        - name: work
+          mountPath: /home/runner/_work
+        - name: sys
+          mountPath: /sys
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
+        - name: cgroup2
+          mountPath: /sys/fs/cgroup2
+        - name: proc
+          mountPath: /proc
+        - name: dev
+          mountPath: /dev
+        - name: dev-pts
+          mountPath: /dev/pts
+        - name: shm
+          mountPath: /dev/shm`
+
+	// Add cache path volume mounts
+	if len(installation.CachePaths) > 0 {
+		for _, path := range installation.CachePaths {
+			hookExtension += fmt.Sprintf("\n        - name: cache-%s\n          mountPath: %s",
+				sanitizeVolumeName(path.MountPath), path.MountPath)
+		}
+	}
+
+	// Add volume definitions
+	hookExtension += `
+    volumes:
+      - name: work
+        emptyDir: {}
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: cgroup2
+        hostPath:
+          path: /sys/fs/cgroup2
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: dev-pts
+        hostPath:
+          path: /dev/pts
+          type: Directory
+      - name: shm
+        hostPath:
+          path: /dev/shm
+          type: Directory`
+
+	// Add cache path volumes
+	if len(installation.CachePaths) > 0 {
+		for _, path := range installation.CachePaths {
+			hookExtension += fmt.Sprintf("\n      - name: cache-%s\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
+				sanitizeVolumeName(path.MountPath), path.HostPath)
+		}
+	}
+
+	return hookExtension
+}
+
+// sanitizeVolumeName sanitutes a mount path to a valid Kubernetes volume name
+func sanitizeVolumeName(path string) string {
+	// Replace forward slashes and dots with hyphens, convert to lowercase
+	name := strings.ToLower(strings.Trim(path, "/"))
+	name = strings.ReplaceAll(name, "/", "-")
+	name = strings.ReplaceAll(name, ".", "-")
+	return name
+}
 func (m *Manager) ensureARCController(ctx context.Context) error {
 	// Check if CRDs are already installed
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "crd", "autoscalingrunnersets.actions.github.com",
