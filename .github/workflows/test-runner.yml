@@ -9,18 +9,9 @@ jobs:
   test:
     runs-on: test-runner
     container:
-      image: ubuntu:22.04
+      image: docker:dind
       options: --privileged --init
     steps:
-      - name: Install Docker in container
-        run: |
-          echo "=== Installing Docker ==="
-          apt-get update -qq
-          apt-get install -y -qq docker.io
-          echo "Docker installed successfully"
-          docker --version
-          dockerd --version
-          
       - name: Check container capabilities
         run: |
           echo "=== Container Diagnostics ==="
@@ -37,95 +28,33 @@ jobs:
           echo "=== Checking for docker ==="
           which docker || echo "docker not found in PATH"
           which dockerd || echo "dockerd not found in PATH"
+          docker --version
+          dockerd --version
           echo ""
           echo "=== Checking /sys/fs/cgroup ==="
           ls -la /sys/fs/cgroup/ | head -20
       - name: Start Docker daemon
         run: |
-          # Create necessary directories
-          mkdir -p /var/lib/docker
-          mkdir -p /var/run
-          mkdir -p /tmp/dind
-          mkdir -p /etc/docker
-          mkdir -p /var/log
-
-          # Write Docker daemon configuration WITHOUT systemd driver
-          # (systemd driver requires systemd running, but we have docker-init/tini)
-          cat > /etc/docker/daemon.json <<'EOF'
-          {
-            "log-driver": "json-file",
-            "log-opts": {
-              "max-size": "100m"
-            },
-            "storage-driver": "vfs"
-          }
-          EOF
-
-          # Enable cgroup v2 controller delegation for nested containers
-          echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || {
-            # If direct write fails, move processes to init.scope first
-            mkdir -p /sys/fs/cgroup/init.scope
-            cp /sys/fs/cgroup/cgroup.procs /tmp/cgroup-pids.txt
-            while IFS= read -r pid; do
-              echo "$pid" > /sys/fs/cgroup/init.scope/cgroup.procs 2>/dev/null || true
-            done < /tmp/cgroup-pids.txt
-            rm -f /tmp/cgroup-pids.txt
-            # Retry delegation after moving processes
-            echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
-          }
-
-          # Start dockerd in the background with custom socket path
-          dockerd \
-              --host=unix:///tmp/dind/docker.sock \
-              --data-root=/var/lib/docker \
-              --log-level=debug \
-              --insecure-registry=0.0.0.0/0 \
-              >/var/log/dockerd.log 2>&1 &
-
-          # Store dockerd PID for cleanup
-          DOCKERD_PID=$!
-          if [ -n "$GITHUB_ENV" ] && [ -w "$GITHUB_ENV" ]; then
-            echo "DOCKERD_PID=$DOCKERD_PID" >> "$GITHUB_ENV"
-          fi
-
-          echo "Docker daemon started with PID $DOCKERD_PID"
-          sleep 2
-          
-          echo "Docker daemon log (initial):"
-          cat /var/log/dockerd.log || echo "No log file yet"
-          
-          # Wait for docker daemon to be ready (increased timeout to 120 seconds for debugging)
-          echo "Waiting for Docker daemon to start..."
+          # docker:dind image already has docker daemon configured
+          # Wait for it to be ready
+          echo "Waiting for Docker daemon to be ready..."
           timeout=120
           attempt=0
-          while ! DOCKER_HOST=unix:///tmp/dind/docker.sock docker info >/dev/null 2>&1; do
+          while ! docker info >/dev/null 2>&1; do
               attempt=$((attempt + 1))
-              echo "Attempt $attempt/120: Waiting for Docker daemon... (timeout remaining: $timeout)"
-              
-              # Show docker log every 10 attempts
-              if [ $((attempt % 10)) -eq 0 ]; then
-                echo "=== Docker daemon log (attempt $attempt) ==="
-                cat /var/log/dockerd.log || echo "No log file"
-                echo ""
-              fi
+              echo "Attempt $attempt/120: Waiting for Docker daemon..."
               
               sleep 1
               timeout=$((timeout - 1))
               if [ "$timeout" -le 0 ]; then
                   echo "Error: Docker daemon failed to start within 120 seconds"
-                  echo "=== Final docker daemon log ==="
-                  cat /var/log/dockerd.log || echo "No log file"
-                  echo ""
-                  echo "=== Process list ==="
-                  ps aux | grep -E 'dockerd|docker' || echo "No docker processes found"
-                  echo ""
-                  echo "=== Socket status ==="
-                  ls -la /tmp/dind/ || echo "No /tmp/dind directory"
+                  docker info || true
                   exit 1
               fi
           done
 
-          echo "Docker daemon started successfully"
+          echo "Docker daemon is ready!"
+          docker info
 
       - uses: actions/checkout@v4
       - name: Run simple test
