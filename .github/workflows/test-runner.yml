@@ -12,6 +12,25 @@ jobs:
       image: ubuntu:22.04
       options: --privileged --init
     steps:
+      - name: Check container capabilities
+        run: |
+          echo "=== Container Diagnostics ==="
+          echo "Running as UID: $(id -u)"
+          echo "User: $(whoami)"
+          echo "Groups: $(groups)"
+          echo ""
+          echo "=== Checking privileged mode ==="
+          cat /proc/self/status | grep Cap
+          echo ""
+          echo "=== Checking cgroups ==="
+          mount | grep cgroup
+          echo ""
+          echo "=== Checking for docker ==="
+          which docker || echo "docker not found in PATH"
+          which dockerd || echo "dockerd not found in PATH"
+          echo ""
+          echo "=== Checking /sys/fs/cgroup ==="
+          ls -la /sys/fs/cgroup/ | head -20
       - name: Start Docker daemon
         run: |
           # Create necessary directories
@@ -50,7 +69,7 @@ jobs:
           dockerd \
               --host=unix:///tmp/dind/docker.sock \
               --data-root=/var/lib/docker \
-              --log-level=error \
+              --log-level=debug \
               --insecure-registry=0.0.0.0/0 \
               >/var/log/dockerd.log 2>&1 &
 
@@ -60,6 +79,12 @@ jobs:
             echo "DOCKERD_PID=$DOCKERD_PID" >> "$GITHUB_ENV"
           fi
 
+          echo "Docker daemon started with PID $DOCKERD_PID"
+          sleep 2
+          
+          echo "Docker daemon log:"
+          cat /var/log/dockerd.log || echo "No log file yet"
+          
           # Wait for docker daemon to be ready
           echo "Waiting for Docker daemon to start..."
           timeout=30
@@ -68,6 +93,8 @@ jobs:
               timeout=$((timeout - 1))
               if [ "$timeout" -le 0 ]; then
                   echo "Error: Docker daemon failed to start within 30 seconds"
+                  echo "Final docker log:"
+                  cat /var/log/dockerd.log || echo "No log file"
                   exit 1
               fi
           done
