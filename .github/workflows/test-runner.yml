@@ -9,81 +9,90 @@ jobs:
   test:
     runs-on: test-runner
     container:
-      image: nixos/nix:latest
+      image: ghcr.io/nixos/nix:latest
       options: --privileged
     steps:
-      - name: Install Docker via nix
-        run: |
-          echo "Installing Docker via nix-env..."
-          nix-env -i docker
-          echo "Docker installation complete"
-          
-      - name: Check container capabilities
-        run: |
-          echo "=== Container Diagnostics ==="
-          echo "Running as UID: $(id -u)"
-          echo "User: $(whoami)"
-          echo "Groups: $(groups)"
-          echo ""
-          echo "=== Checking privileged mode ==="
-          cat /proc/self/status | grep Cap || true
-          echo ""
-          echo "=== Checking cgroups ==="
-          mount | grep cgroup || echo "No cgroup mounts found"
-          echo ""
-          echo "=== Checking for docker ==="
-          which docker
-          docker --version
-          echo ""
-          echo "=== Checking /sys/fs/cgroup ==="
-          ls -la /sys/fs/cgroup/ | head -20
-          
       - name: Start Docker daemon
         run: |
-          echo "Starting Docker daemon..."
-          mkdir -p /var/run/docker
-          dockerd --storage-driver overlay2 > /tmp/docker.log 2>&1 &
-          DOCKERD_PID=$!
-          echo "Docker daemon started with PID: $DOCKERD_PID"
-          
-          echo "Waiting for Docker daemon to be ready..."
-          timeout=120
-          attempt=0
-          while ! docker info >/dev/null 2>&1; do
-              attempt=$((attempt + 1))
-              echo "Attempt $attempt/120: Waiting for Docker daemon..."
+          # Create necessary directories
+          mkdir -p /var/lib/docker
+          mkdir -p /var/run
+          mkdir -p /tmp/dind
+          mkdir -p /etc/docker
+          mkdir -p /var/log
+
+          # Install Docker via nix
+          nix-env -i docker
+
+          # Write Docker daemon configuration with vfs driver
+          # (vfs driver works better in Kubernetes environments)
+          cat > /etc/docker/daemon.json <<'EOF'
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "100m"
+            },
+            "storage-driver": "vfs"
+          }
+          EOF
+
+          # Enable cgroup v2 controller delegation for nested containers
+          # This allows kind containers to run systemd properly
+          echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || {
+            # If direct write fails, move processes to init.scope first
+            mkdir -p /sys/fs/cgroup/init.scope
+            # Copy PIDs to temp file to avoid reading and writing cgroup.procs simultaneously
+            cp /sys/fs/cgroup/cgroup.procs /tmp/cgroup-pids.txt
+            while IFS= read -r pid; do
+              echo "$pid" > /sys/fs/cgroup/init.scope/cgroup.procs 2>/dev/null || true
+            done < /tmp/cgroup-pids.txt
+            rm -f /tmp/cgroup-pids.txt
+            # Retry delegation after moving processes
+            echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
+          }
+
+          # Start dockerd in the background with custom socket path
+          dockerd \
+              --host=unix:///tmp/dind/docker.sock \
+              --data-root=/var/lib/docker \
+              --log-level=error \
+              >/var/log/dockerd.log 2>&1 &
+
+          # Wait for docker daemon to be ready
+          echo "Waiting for Docker daemon to start..."
+          timeout=30
+          while ! DOCKER_HOST=unix:///tmp/dind/docker.sock docker info >/dev/null 2>&1; do
               sleep 1
               timeout=$((timeout - 1))
               if [ "$timeout" -le 0 ]; then
-                  echo "Error: Docker daemon failed to start within 120 seconds"
-                  docker info || true
-                  echo "=== Docker daemon logs ==="
-                  cat /tmp/docker.log || true
+                  echo "Error: Docker daemon failed to start within 30 seconds"
+                  cat /var/log/dockerd.log || true
                   exit 1
               fi
           done
-          
-          echo "Docker daemon is ready!"
-          docker info
+
+          echo "Docker daemon started successfully"
 
       - uses: actions/checkout@v4
-      
+
       - name: Run basic test
         run: |
           echo "Running on ARC scale set runner in container"
           echo "Hostname: $(hostname)"
           echo "Username: $(whoami)"
           id
-          
+
       - name: Test Docker availability
         run: |
+          export DOCKER_HOST=unix:///tmp/dind/docker.sock
           echo "Testing Docker daemon availability..."
           docker info
           docker ps
           echo "Docker is working!"
-          
+
       - name: Test basic Docker operations
         run: |
+          export DOCKER_HOST=unix:///tmp/dind/docker.sock
           echo "Testing basic Docker operations..."
           docker pull alpine:latest --quiet || docker pull alpine:latest
           docker run --rm alpine:latest echo "Docker run successful!"
