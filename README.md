@@ -6,6 +6,8 @@ DeskRun: Unlocking Local Compute for GitHub Actions.
 
 `deskrun` is a CLI tool for running GitHub Actions locally using kind (Kubernetes in Docker) clusters. It provides easy management of local GitHub Actions runners with optimized configurations based on lessons learned from production deployments.
 
+**⚠️ Important Limitation**: Deskrun uses ARC ephemeral runners, which do NOT support label-based job routing (e.g., `runs-on: [self-hosted]`). See [LIMITATIONS.md](LIMITATIONS.md) for details and workarounds.
+
 ## Features
 
 - **Simple CLI Interface**: Easy-to-use commands for managing runner installations
@@ -34,6 +36,40 @@ sudo make install
 ```
 
 ## Usage
+
+### Important: Using Deskrun Without Label-Based Routing
+
+Since deskrun runners don't receive labels from GitHub, standard workflows that request `runs-on: [self-hosted]` won't work automatically. Instead, use one of these approaches:
+
+**Option 1: Manually Trigger Workflows (Recommended for Testing)**
+```yaml
+name: Test Workflow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # ← Allows manual triggering on deskrun
+
+jobs:
+  test:
+    runs-on: [self-hosted]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./test.sh
+```
+
+Then manually trigger with:
+```bash
+gh workflow run test-workflow.yml --ref main
+```
+
+**Option 2: Use GitHub Enterprise Runner Groups** (if available)
+If you have GitHub Enterprise Cloud, use runner groups instead of labels.
+
+**Option 3: Use GitHub-Hosted Runners** (for automatic routing)
+For production workflows, use GitHub-hosted runners which do support automatic routing.
+
+See [LIMITATIONS.md](LIMITATIONS.md) for complete details and more options.
 
 ### Adding a Runner Installation
 
@@ -288,6 +324,12 @@ make fmt
 ## License
 
 [Add your license here]
+
+## Learn More
+
+- **[LIMITATIONS.md](LIMITATIONS.md)** - Important information about ARC ephemeral runner limitations and workarounds
+- **[GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md)** - Technical deep dive into why label-based job routing doesn't work
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## Contributing
 
