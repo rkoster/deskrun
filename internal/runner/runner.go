@@ -365,8 +365,37 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 	var containerModeConfig map[string]interface{}
 	switch installation.ContainerMode {
 	case types.ContainerModeKubernetes:
+		// Standard kubernetes mode with simple template (no hook extension)
 		containerModeConfig = map[string]interface{}{
 			"type": "kubernetes",
+			// Add storage configuration for kubernetes mode - must be inside containerMode
+			"kubernetesModeWorkVolumeClaim": map[string]interface{}{
+				"accessModes":      []string{"ReadWriteOnce"},
+				"storageClassName": "standard",
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"storage": "1Gi",
+					},
+				},
+			},
+		}
+		// Add simple template without hook extension
+		values["template"] = map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []map[string]interface{}{
+					{
+						"name":    "runner",
+						"image":   "ghcr.io/actions/actions-runner:latest",
+						"command": []string{"/home/runner/run.sh"},
+						"env": []map[string]interface{}{
+							{
+								"name":  "ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER",
+								"value": "true",
+							},
+						},
+					},
+				},
+			},
 		}
 	case types.ContainerModePrivileged:
 		// For privileged mode, we need to parse the generated YAML string into a map
