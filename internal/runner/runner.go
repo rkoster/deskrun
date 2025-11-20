@@ -342,9 +342,10 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 		"minRunners":         installation.MinRunners,
 		"maxRunners":         installation.MaxRunners,
 		"runnerScaleSetName": instanceName,
-		// Add standard labels for self-hosted runners
-		// These labels allow workflows to target runners with "runs-on: self-hosted"
-		"runnerLabels": []string{"self-hosted"},
+		// Note: GitHub automatically assigns the "self-hosted" label to all self-hosted runners,
+		// including ephemeral runners created by ARC. This happens on the GitHub side and doesn't
+		// need to be explicitly configured. The ARC Helm chart does not support the runnerLabels field,
+		// so we don't add it here.
 	}
 
 	// Determine authentication method
