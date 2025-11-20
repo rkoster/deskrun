@@ -530,11 +530,11 @@ metadata:
   namespace: ` + defaultNamespace + `
 data:
   content: |
-    spec:
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-        fsGroup: 0
+     spec:
+       securityContext:
+         runAsUser: 0
+         runAsGroup: 0
+         fsGroup: 0
        containers:
        - name: "$job"
          securityContext:
@@ -559,19 +559,19 @@ data:
          command: ["/bin/sh", "-c"]
          args: ["/usr/local/bin/dockerd & tail -f /dev/null"]
          volumeMounts:
-        - name: sys
-          mountPath: /sys
-        - name: cgroup
-          mountPath: /sys/fs/cgroup
-          mountPropagation: Bidirectional
-        - name: proc
-          mountPath: /proc
-        - name: dev
-          mountPath: /dev
-        - name: dev-pts
-          mountPath: /dev/pts
-        - name: shm
-          mountPath: /dev/shm`
+         - name: sys
+           mountPath: /sys
+         - name: cgroup
+           mountPath: /sys/fs/cgroup
+           mountPropagation: Bidirectional
+         - name: proc
+           mountPath: /proc
+         - name: dev
+           mountPath: /dev
+         - name: dev-pts
+           mountPath: /dev/pts
+         - name: shm
+           mountPath: /dev/shm`
 
 	// Add cache path volume mounts
 	if len(installation.CachePaths) > 0 {
