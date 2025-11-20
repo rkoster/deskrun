@@ -187,6 +187,17 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 		return fmt.Errorf("failed to install runner scale set: %w", err)
 	}
 
+	// Patch the ARS resource to set minRunners and maxRunners
+	// The Helm chart doesn't expose these values, so we need to patch after install
+	patchJSON := fmt.Sprintf(`{"spec":{"minRunners":%d,"maxRunners":%d}}`,
+		installation.MinRunners, installation.MaxRunners)
+	patchCmd := exec.CommandContext(ctx, "kubectl", "patch", "autoscalingrunnersets",
+		"-n", defaultNamespace, instanceName, "--type", "merge", "-p", patchJSON,
+		"--context", m.clusterManager.GetKubeconfig())
+	if err := patchCmd.Run(); err != nil {
+		return fmt.Errorf("failed to patch ARS minRunners/maxRunners: %w", err)
+	}
+
 	fmt.Printf("  Instance '%s' installed successfully\n", instanceName)
 	return nil
 }
