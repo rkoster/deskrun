@@ -114,9 +114,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Validate instances
-	if addInstances < 1 {
-		return fmt.Errorf("instances must be at least 1")
+	// Validate parameters
+	if err := validateAddParams(addInstances, addMaxRunners, containerMode); err != nil {
+		return err
 	}
 
 	// Create installation
@@ -146,6 +146,27 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Runner '%s' added to configuration\n", name)
 	fmt.Println("\nTo deploy this runner, run:")
 	fmt.Println("  deskrun up")
+	return nil
+}
+
+// validateAddParams validates the instances and max-runners parameters
+func validateAddParams(instances, maxRunners int, containerMode types.ContainerMode) error {
+	// Validate instances
+	if instances < 1 {
+		return fmt.Errorf("instances must be at least 1")
+	}
+
+	// Validate instances and max-runners combination
+	if instances > 1 && maxRunners > 1 {
+		return fmt.Errorf("cannot use --instances > 1 with --max-runners > 1; use --instances for scaling with multiple separate runner scale sets, or use --max-runners for scaling within a single runner scale set")
+	}
+
+	// For cached-privileged-kubernetes mode, force max-runners to 1
+	// This mode should only scale via instances for proper cache isolation
+	if containerMode == types.ContainerModePrivileged && maxRunners > 1 {
+		return fmt.Errorf("cached-privileged-kubernetes mode requires --max-runners=1; use --instances to scale instead for proper cache isolation")
+	}
+
 	return nil
 }
 
