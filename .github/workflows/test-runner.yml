@@ -5,30 +5,13 @@ on:
     branches: [copilot/implement-github-actions-runner]
   workflow_dispatch:
 
-# Note: To enable caching for faster builds, add both `/nix/store` and `/var/lib/docker`:
-# deskrun add test-runner --repository <url> --mode cached-privileged-kubernetes \
-#   --cache /nix/store --cache /var/lib/docker \
-#   --auth-type pat --auth-value <token>
-
 jobs:
   test:
     runs-on: test-runner
     container:
-      # Use a standard Linux image with bash and coreutils available
-      # We'll install nix and docker in the container
-      image: ubuntu:latest
+      image: ghcr.io/nixos/nix:latest
       options: --privileged
     steps:
-      - name: Install nix and docker
-        run: |
-          apt-get update
-          apt-get install -y curl sudo
-          # Install nix
-          curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-          
-          # Install docker
-          apt-get install -y docker.io
       - name: Start Docker daemon
         run: |
           # Create necessary directories
@@ -38,7 +21,9 @@ jobs:
           mkdir -p /etc/docker
           mkdir -p /var/log
 
-          # Docker is already installed via apt-get, just configure it
+          # Install Docker via nix
+          nix-env -i docker
+
           # Write Docker daemon configuration with vfs driver
           # (vfs driver works better in Kubernetes environments)
           cat > /etc/docker/daemon.json <<'EOF'
@@ -69,7 +54,6 @@ jobs:
           # Start dockerd in the background with custom socket path
           dockerd \
               --host=unix:///tmp/dind/docker.sock \
-              --config-file=/etc/docker/daemon.json \
               --data-root=/var/lib/docker \
               --log-level=error \
               >/var/log/dockerd.log 2>&1 &
@@ -89,6 +73,15 @@ jobs:
 
           echo "Docker daemon started successfully"
 
+      - uses: actions/checkout@v4
+
+      - name: Run basic test
+        run: |
+          echo "Running on ARC scale set runner in container"
+          echo "Hostname: $(hostname)"
+          echo "Username: $(whoami)"
+          id
+
       - name: Test Docker availability
         run: |
           export DOCKER_HOST=unix:///tmp/dind/docker.sock
@@ -104,3 +97,4 @@ jobs:
           docker pull alpine:latest --quiet || docker pull alpine:latest
           docker run --rm alpine:latest echo "Docker run successful!"
           echo "All Docker tests passed!"
+
