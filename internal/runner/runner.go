@@ -446,8 +446,9 @@ template:
 // generateHookExtensionConfigMap generates the hook extension ConfigMap YAML for privileged container mode
 // This ConfigMap contains the PodSpec patch that ARC applies to job containers
 func (m *Manager) generateHookExtensionConfigMap(installation *types.RunnerInstallation, instanceName string) string {
-	// Build the PodSpec patch that will be applied to job containers
+	// Build the PodSpec patch that will be applied to job pods
 	// This patch adds privileged context and capabilities only to job containers
+	// The "$job" placeholder targets the job container created by the runner
 	hookExtension := `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -455,16 +456,20 @@ metadata:
   namespace: ` + defaultNamespace + `
 data:
   hook-extension.yaml: |
-    version: 1
-    container:
-      image: "{{ $.job.container.image }}"
+    spec:
       securityContext:
-        privileged: true
         runAsUser: 0
         runAsGroup: 0
-        allowPrivilegeEscalation: true
-        capabilities:
-          add:
+        fsGroup: 0
+      containers:
+      - name: "$job"
+        securityContext:
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
             - SYS_ADMIN
             - NET_ADMIN
             - SYS_PTRACE
@@ -477,7 +482,7 @@ data:
             - MKNOD
             - AUDIT_WRITE
             - AUDIT_CONTROL
-      volumeMounts:
+        volumeMounts:
         - name: work
           mountPath: /home/runner/_work
         - name: sys
@@ -505,7 +510,7 @@ data:
 
 	// Add volume definitions
 	hookExtension += `
-    volumes:
+      volumes:
       - name: work
         emptyDir: {}
       - name: sys
