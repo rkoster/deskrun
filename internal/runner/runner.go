@@ -573,9 +573,9 @@ data:
              - MKNOD
              - AUDIT_WRITE
              - AUDIT_CONTROL
-         command: ["/bin/sh", "-c"]
-         args: ["/usr/local/bin/dockerd & tail -f /dev/null"]
-         volumeMounts:
+          command: ["/bin/sh", "-c"]
+          args: ["/usr/local/bin/dockerd > /tmp/docker.log 2>&1 & sleep 2 && timeout 30 sh -c 'until docker info > /dev/null 2>&1; do sleep 0.5; done' && tail -f /dev/null"]
+          volumeMounts:
          - name: sys
            mountPath: /sys
          - name: cgroup
@@ -600,31 +600,31 @@ data:
 
 	// Add volume definitions (only for host path mounts, not work which is already in runner template)
 	hookExtension += `
-      volumes:
-      - name: sys
-        hostPath:
-          path: /sys
-          type: Directory
-      - name: cgroup
-        hostPath:
-          path: /sys/fs/cgroup
-          type: Directory
-      - name: proc
-        hostPath:
-          path: /proc
-          type: Directory
-      - name: dev
-        hostPath:
-          path: /dev
-          type: Directory
-      - name: dev-pts
-        hostPath:
-          path: /dev/pts
-          type: Directory
-      - name: shm
-        hostPath:
-          path: /dev/shm
-          type: Directory`
+       volumes:
+       - name: sys
+         hostPath:
+           path: /sys
+           type: Directory
+       - name: cgroup
+         hostPath:
+           path: /sys/fs/cgroup
+           type: Directory
+       - name: proc
+         hostPath:
+           path: /proc
+           type: Directory
+       - name: dev
+         hostPath:
+           path: /dev
+           type: Directory
+       - name: dev-pts
+         hostPath:
+           path: /dev/pts
+           type: Directory
+       - name: shm
+         hostPath:
+           path: /dev/shm
+           type: Directory`
 
 	// Add cache path volumes
 	if len(installation.CachePaths) > 0 {
