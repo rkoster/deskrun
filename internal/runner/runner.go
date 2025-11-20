@@ -121,7 +121,7 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 
 	// Prepare Helm values with instance-specific cache paths
 	valuesPath := filepath.Join(tmpDir, "values.yaml")
-	valuesContent, err := m.generateHelmValues(installation, instanceNum)
+	valuesContent, err := m.generateHelmValues(installation, instanceName, instanceNum)
 	if err != nil {
 		return fmt.Errorf("failed to generate helm values: %w", err)
 	}
@@ -307,7 +307,7 @@ func containsMiddle(s, substr string) bool {
 }
 
 // generateHelmValues generates Helm values for the runner scale set
-func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, instanceNum int) (string, error) {
+func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, instanceName string, instanceNum int) (string, error) {
 	// Determine authentication method
 	var githubConfigSecret string
 	if installation.AuthType == types.AuthTypePAT {
@@ -336,12 +336,14 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 		return "", fmt.Errorf("unsupported container mode: %s", installation.ContainerMode)
 	}
 
-	// For multi-instance setups, all instances should be in the same runner group
-	// using the base installation name
+	// For repository-level runners, use the default runner group
+	// Custom runner groups are primarily an organization-level feature
 	runnerGroupConfig := ""
-	if installation.Instances > 1 {
-		runnerGroupConfig = fmt.Sprintf(`runnerGroup: "%s"`, installation.Name)
-	}
+	// Note: Removed custom runner group logic to use GitHub's default group
+
+	// Add runner labels so workflows can target these runners
+	// Use the instance name to ensure unique ServiceAccount names across instances
+	runnerLabels := fmt.Sprintf(`runnerScaleSetName: "%s"`, instanceName)
 
 	values := fmt.Sprintf(`githubConfigUrl: "%s"
 minRunners: %d
@@ -350,8 +352,10 @@ maxRunners: %d
 %s
 
 %s
-`, installation.Repository, installation.MinRunners, installation.MaxRunners, 
-		runnerGroupConfig, githubConfigSecret, containerModeConfig)
+
+%s
+`, installation.Repository, installation.MinRunners, installation.MaxRunners,
+		runnerGroupConfig, githubConfigSecret, runnerLabels, containerModeConfig)
 
 	return values, nil
 }
