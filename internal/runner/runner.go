@@ -342,6 +342,9 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 		"minRunners":         installation.MinRunners,
 		"maxRunners":         installation.MaxRunners,
 		"runnerScaleSetName": instanceName,
+		// Add standard labels for self-hosted runners
+		// These labels allow workflows to target runners with "runs-on: self-hosted"
+		"runnerLabels": []string{"self-hosted"},
 	}
 
 	// Determine authentication method
