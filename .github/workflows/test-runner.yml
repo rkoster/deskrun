@@ -42,7 +42,7 @@ jobs:
         run: |
           echo "Starting Docker daemon..."
           mkdir -p /var/run/docker
-          dockerd --storage-driver overlay2 --host unix:///var/run/docker.sock > /tmp/docker.log 2>&1 &
+          dockerd --storage-driver overlay2 > /tmp/docker.log 2>&1 &
           DOCKERD_PID=$!
           echo "Docker daemon started with PID: $DOCKERD_PID"
           
