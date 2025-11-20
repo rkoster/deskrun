@@ -7,7 +7,7 @@ import (
 	"github.com/rkoster/deskrun/pkg/types"
 )
 
-func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
+func TestGenerateHelmValues_RepositoryLevel(t *testing.T) {
 	tests := []struct {
 		name            string
 		installation    *types.RunnerInstallation
@@ -31,7 +31,7 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 			wantNotContains: "runnerGroup:",
 		},
 		{
-			name: "multiple instances should include runnerGroup with base name",
+			name: "multi-instance setup should not include runnerGroup",
 			installation: &types.RunnerInstallation{
 				Name:          "test-runner",
 				Repository:    "https://github.com/owner/repo",
@@ -42,11 +42,11 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 				AuthType:      types.AuthTypePAT,
 				AuthValue:     "test-token",
 			},
-			instanceNum:  1,
-			wantContains: `runnerGroup: "test-runner"`,
+			instanceNum:     1,
+			wantNotContains: "runnerGroup:",
 		},
 		{
-			name: "multiple instances second instance should have same runnerGroup",
+			name: "runnerScaleSetName should be set to instance name",
 			installation: &types.RunnerInstallation{
 				Name:          "my-runner",
 				Repository:    "https://github.com/owner/repo",
@@ -58,7 +58,7 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 				AuthValue:     "test-token",
 			},
 			instanceNum:  3,
-			wantContains: `runnerGroup: "my-runner"`,
+			wantContains: `runnerScaleSetName: "my-runner-3"`,
 		},
 	}
 
@@ -85,7 +85,7 @@ func TestGenerateHelmValues_RunnerGroup(t *testing.T) {
 	}
 }
 
-func TestGenerateHelmValues_AllInstancesSameGroup(t *testing.T) {
+func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	installation := &types.RunnerInstallation{
 		Name:          "shared-runner",
 		Repository:    "https://github.com/owner/repo",
@@ -110,11 +110,11 @@ func TestGenerateHelmValues_AllInstancesSameGroup(t *testing.T) {
 		values = append(values, val)
 	}
 
-	// All instances should have the same runnerGroup
-	expectedGroup := `runnerGroup: "shared-runner"`
+	// Repository-level runners should never have runnerGroup set
+	unexpectedGroup := "runnerGroup:"
 	for i, val := range values {
-		if !strings.Contains(val, expectedGroup) {
-			t.Errorf("Instance %d does not contain expected runnerGroup %q\nGot:\n%s", i+1, expectedGroup, val)
+		if strings.Contains(val, unexpectedGroup) {
+			t.Errorf("Instance %d should not contain %q (runnerGroup is organization-only)\nGot:\n%s", i+1, unexpectedGroup, val)
 		}
 	}
 }

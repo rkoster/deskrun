@@ -353,13 +353,6 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 		return "", fmt.Errorf("unsupported container mode: %s", installation.ContainerMode)
 	}
 
-	// For repository-level runners, use the default runner group
-	// For multi-instance setups, all instances share the same base runner group
-	runnerGroupConfig := ""
-	if installation.Instances > 1 {
-		runnerGroupConfig = fmt.Sprintf(`runnerGroup: "%s"`, installation.Name)
-	}
-
 	// Add runner labels so workflows can target these runners
 	// Use the instance name to ensure unique ServiceAccount names across instances
 	runnerLabels := fmt.Sprintf(`runnerScaleSetName: "%s"`, instanceName)
@@ -368,13 +361,12 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 minRunners: %d
 maxRunners: %d
 %s
-%s
 
 %s
 
 %s
 `, installation.Repository, installation.MinRunners, installation.MaxRunners,
-		runnerGroupConfig, githubConfigSecret, runnerLabels, containerModeConfig)
+		githubConfigSecret, runnerLabels, containerModeConfig)
 
 	return values, nil
 }
