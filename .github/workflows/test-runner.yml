@@ -23,11 +23,11 @@ jobs:
           cat /proc/self/status | grep Cap
           echo ""
           echo "=== Checking cgroups ==="
-          mount | grep cgroup
+          mount | grep cgroup || echo "No cgroup mounts found"
           echo ""
           echo "=== Checking for docker ==="
-          which docker || echo "docker not found in PATH"
-          which dockerd || echo "dockerd not found in PATH"
+          which docker
+          which dockerd
           docker --version
           dockerd --version
           echo ""
