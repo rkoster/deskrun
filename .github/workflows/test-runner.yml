@@ -5,9 +5,10 @@ on:
     branches: [copilot/implement-github-actions-runner]
   workflow_dispatch:
 
-# Note: To enable Nix store caching for faster builds, add `--cache /nix/store` 
-# when installing the runner with:
-# deskrun add test-runner --repository <url> --mode cached-privileged-kubernetes --cache /nix/store --auth-type pat --auth-value <token>
+# Note: To enable caching for faster builds, add both `/nix/store` and `/var/lib/docker`:
+# deskrun add test-runner --repository <url> --mode cached-privileged-kubernetes \
+#   --cache /nix/store --cache /var/lib/docker \
+#   --auth-type pat --auth-value <token>
 
 jobs:
   test:
