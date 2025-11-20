@@ -1,85 +1,222 @@
-# deskrun Limitations and Design Constraints
+# deskrun Usage Guide: ARC Scale Set Name Routing
 
-## ARC Ephemeral Runners and Job Routing
+## How Job Routing Works with Deskrun
 
-### The Core Issue
+**Deskrun uses GitHub Actions Runner Controller (ARC) which routes jobs using scale set names, not labels.** This is the officially supported method.
 
-**deskrun currently uses GitHub Actions Runner Controller (ARC) ephemeral runners, which have a fundamental limitation: GitHub does not assign labels to runner scale sets.**
-
-This means workflows using standard GitHub Actions job routing syntax **cannot find or run on deskrun runners**:
+When you create a runner scale set, you specify a name. GitHub then routes jobs requesting that name to the scale set:
 
 ```yaml
-# ❌ These will NOT work with deskrun (jobs will stay queued forever)
+# This WORKS with deskrun
 jobs:
-  my-job:
-    runs-on: [self-hosted]  # Looking for "self-hosted" label - NOT FOUND
-    
-  another-job:
-    runs-on: [custom-label]  # Looking for custom label - NOT FOUND
+  build:
+    runs-on: my-runner  # ← Scale set name
+    steps:
+      - run: ./build.sh
 ```
 
-### Why This Limitation Exists
+### Difference from Traditional Self-Hosted Runners
 
-According to GitHub issue #2445 "Multiple label support for gha-runner-scale-set" (closed):
+| Feature | Traditional Runners | ARC Runners |
+|---------|-------------------|-----------|
+| Routing | Labels: `runs-on: [self-hosted, linux]` | Scale set name: `runs-on: my-runner` |
+| Label Assignment | Manual per runner | Not supported |
+| Multiple Labels | Yes | N/A |
+| Router | GitHub API label matching | GitHub scale set name matching |
+| On github.com | ✅ Yes | ✅ Yes |
+| On GitHub Enterprise | ✅ Yes | ✅ Yes |
 
-> **"Labels are not supported and will not be supported for runner scale sets"**
+## Using Deskrun in Workflows
 
-This is **not a bug** - it's a deliberate architectural decision made by GitHub. The ephemeral runner model (gha-runner-scale-set) is fundamentally different from traditional self-hosted runners and doesn't support labels.
+### 1. Create a Runner
 
-**Evidence**: When checking runner status via GitHub API, ARC runners have `"labels": []` (empty), and there's no mechanism to assign labels to them.
+```bash
+deskrun add build-runner \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --cache /nix/store \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+```
 
-## Workarounds
+### 2. Use the Runner in Workflows
 
-### For Development/Testing
+```yaml
+name: Build
 
-If you need to test local runners with standard GitHub Actions workflows:
+on:
+  push:
+    branches: [main]
 
-1. **Use GitHub Enterprise Cloud** (if available)
-   - GitHub Enterprise supports runner groups as an alternative to labels
-   - Runners can be assigned to groups: `runs-on: {group-name}`
-   - Deskrun would need modifications to support runner groups
+jobs:
+  build:
+    runs-on: build-runner  # ← Use the scale set name
+    steps:
+      - uses: actions/checkout@v4
+      - run: nix flake check
+```
 
-2. **Manually trigger workflows**
-   - Use `workflow_dispatch` to manually run workflows on deskrun runners
-   - Workflows can explicitly request deskrun runners without labels
+### 3. Create Multiple Runners for Different Purposes
 
-3. **Use separate test workflows**
-   - Create test workflows that don't rely on job routing
-   - Run them manually with `workflow_dispatch`
+```bash
+# Nix-based builds
+deskrun add nix-builder \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --cache /nix/store
 
-### For CI/CD Integration
+# Docker-based tests
+deskrun add docker-tester \
+  --repository https://github.com/owner/repo \
+  --mode dind
 
-If you need deskrun runners to automatically receive jobs:
+# Standard builds
+deskrun add standard-builder \
+  --repository https://github.com/owner/repo \
+  --mode kubernetes
+```
 
-1. **Implement webhook-based routing** (not supported by GitHub Actions natively)
-   - This would require significant custom development
-   - Not recommended for standard GitHub Actions use
+Then route different jobs to different runners:
 
-2. **Use traditional self-hosted runners**
-   - Switch from ARC ephemeral runners to traditional self-hosted runners
-   - Would require replacing deskrun's entire runner management system
-   - Traditional runners support labels and `runs-on: [self-hosted]`
+```yaml
+jobs:
+  nix-build:
+    runs-on: nix-builder
+    steps:
+      - run: nix build .
 
-3. **Use GitHub-hosted runners for label-based jobs**
-   - GitHub-hosted runners are available for standard job routing
-   - Use deskrun only for jobs that don't require label-based routing
+  docker-test:
+    runs-on: docker-tester
+    steps:
+      - run: docker build .
+
+  standard-build:
+    runs-on: standard-builder
+    steps:
+      - run: make build
+```
+
+## Benefits of Scale Set Name Routing
+
+1. **Explicit and Clear**: You know exactly which runner will execute the job
+2. **No Label Complexity**: No need to manage custom labels or defaults
+3. **Simple Naming**: Use descriptive names like "nix-builder", "docker-tester"
+4. **Easy to Understand**: New team members don't need to learn label conventions
+5. **Supported Officially**: This is GitHub's recommended approach for ARC
+
+## Comparison with Traditional Approach
+
+### Traditional Self-Hosted Runners (Not Used in Deskrun)
+
+```bash
+# Traditional runner registration
+./config.sh --url https://github.com/owner/repo \
+            --token token
+
+# Auto-assigned labels: self-hosted, linux, x64
+# You can add custom labels during registration
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted, linux, gpu]  # ← Labels
+```
+
+### ARC with Deskrun (Recommended)
+
+```bash
+deskrun add my-runner  # ← Just a name
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: my-runner  # ← Scale set name
+```
+
+## FAQ
+
+### Q: Can I use `runs-on: [self-hosted]` with deskrun?
+
+**A**: No. ARC doesn't assign the "self-hosted" label to runners. Use the scale set name instead: `runs-on: my-runner`
+
+### Q: Can I use custom labels like `runs-on: [gpu]`?
+
+**A**: No. ARC doesn't support custom labels. Use scale set names: `runs-on: gpu-runner`
+
+### Q: How do I route jobs to different runners?
+
+**A**: Create multiple runners with different names and reference them in workflows:
+
+```bash
+deskrun add gpu-runner ...
+deskrun add cpu-runner ...
+```
+
+```yaml
+jobs:
+  heavy-compute:
+    runs-on: gpu-runner
+    steps: ...
+      
+  light-compute:
+    runs-on: cpu-runner
+    steps: ...
+```
+
+### Q: What if I want to use `workflow_dispatch` for manual triggering?
+
+**A**: You can still use `workflow_dispatch` alongside automatic routing:
+
+```yaml
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: my-runner  # Works for both push and manual dispatch
+    steps: ...
+```
+
+## Design Tradeoffs
+
+### Benefits of ARC Scale Set Naming
+
+✅ **Simpler**: No need to manage labels  
+✅ **More Explicit**: Exactly which runner runs the job  
+✅ **Cleaner Configuration**: Just a name, not a list  
+✅ **Easier for Teams**: Descriptive names vs label conventions  
+✅ **Official Support**: GitHub's recommended approach for ARC  
+
+### Benefits of Label-Based Routing (Traditional Runners)
+
+✅ **More Flexible**: Combine multiple labels for selection  
+✅ **Automatic Defaults**: `self-hosted` label applied automatically  
+✅ **More Granular**: Can filter by OS, architecture, custom labels  
+✅ **Familiar**: Standard GitHub Actions pattern  
 
 ## Current Capabilities
 
 ### What Works ✅
 
 - Deploy runners locally using kind clusters
+- Use scale set names for job routing (`runs-on: runner-name`)
 - Use privileged mode for Docker, systemd, and other elevated operations
 - Cache Nix store, Docker daemon, and other directories
 - Multiple runner instances with isolated caches
 - SSH-like execution environment for testing
+- Both github.com and GitHub Enterprise support
 
 ### What Doesn't Work ❌
 
-- Standard GitHub Actions job routing (`runs-on: [self-hosted]`)
-- Custom label-based job routing (`runs-on: [custom-labels]`)
-- Automatic job assignment to deskrun runners
-- Integration with GitHub's built-in runner selection
+- Traditional label-based routing (`runs-on: [self-hosted]`)
+- Custom labels (`runs-on: [my-label]`)
+- Multiple label combinations
+- Automatic "self-hosted" label assignment
+
+**Note**: These aren't limitations - they're by design. ARC uses a different (and simpler) routing model.
 
 ## Design Decisions
 

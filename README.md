@@ -37,39 +37,22 @@ sudo make install
 
 ## Usage
 
-### Important: Using Deskrun Without Label-Based Routing
+### Job Routing with Deskrun
 
-Since deskrun runners don't receive labels from GitHub, standard workflows that request `runs-on: [self-hosted]` won't work automatically. Instead, use one of these approaches:
+Unlike traditional self-hosted runners that use labels (e.g., `runs-on: [self-hosted]`), ARC ephemeral runners use **scale set names** for job routing. This is the officially supported method.
 
-**Option 1: Manually Trigger Workflows (Recommended for Testing)**
+To route jobs to deskrun runners, use the scale set name in your workflow:
+
 ```yaml
-name: Test Workflow
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:  # ← Allows manual triggering on deskrun
-
 jobs:
-  test:
-    runs-on: [self-hosted]
+  build:
+    runs-on: my-runner  # Use the runner's scale set name
     steps:
       - uses: actions/checkout@v4
-      - run: ./test.sh
+      - run: ./build.sh
 ```
 
-Then manually trigger with:
-```bash
-gh workflow run test-workflow.yml --ref main
-```
-
-**Option 2: Use GitHub Enterprise Runner Groups** (if available)
-If you have GitHub Enterprise Cloud, use runner groups instead of labels.
-
-**Option 3: Use GitHub-Hosted Runners** (for automatic routing)
-For production workflows, use GitHub-hosted runners which do support automatic routing.
-
-See [LIMITATIONS.md](LIMITATIONS.md) for complete details and more options.
+See [GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md) for technical details about ARC job routing.
 
 ### Adding a Runner Installation
 

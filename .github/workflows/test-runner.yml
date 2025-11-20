@@ -7,12 +7,12 @@ on:
 
 jobs:
   test:
-    runs-on: [self-hosted]
+    runs-on: test-runner
     steps:
       - uses: actions/checkout@v4
       - name: Run simple test
         run: |
-          echo "Running on self-hosted runner"
+          echo "Running on ARC scale set runner"
           echo "Hostname: $(hostname)"
           echo "Username: $(whoami)"
           id

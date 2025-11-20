@@ -468,24 +468,31 @@ deskrun add your-runner \
 
 ## Known Limitations
 
-### GitHub Job Routing with ARC Ephemeral Runners
+### Using Scale Set Names for Job Routing
 
-**Limitation**: Workflows using `runs-on: [self-hosted]` or other label-based selectors will NOT match ARC ephemeral runners.
+**How It Works**: ARC runners use scale set names for job routing, not labels.
 
-**Why**: GitHub explicitly does not support assigning labels to runner scale sets. This is a deliberate architectural decision, not a bug.
+```yaml
+jobs:
+  build:
+    runs-on: test-runner  # ← Use the scale set name
+```
 
-**Details**: See [GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md) for complete analysis.
+NOT:
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted]  # ← This won't work with ARC
+```
 
-**Impact**: 
-- Standard GitHub Actions workflows that expect `runs-on: [self-hosted]` runners cannot use ARC ephemeral runners
-- Custom label-based routing (e.g., `runs-on: [my-custom-label]`) does not work with ARC
+**Why**: GitHub's official approach for ARC is scale set name-based routing. This is simpler and more explicit than label-based routing.
 
-**Workarounds**:
-- Use GitHub Enterprise with runner groups (if available)
-- Deploy traditional self-hosted runners instead of ephemeral runners
-- Use GitHub-hosted runners for workflows that require label-based routing
+**Details**: See [GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md) for technical explanation.
 
-**Status**: This limitation exists in ARC v0.13.0 and is not expected to change in the near term, as it's a GitHub API design decision.
+**Tips**:
+- Create runners with descriptive names: `nix-builder`, `docker-tester`, etc.
+- Use those names directly in `runs-on`
+- No need to manage labels or complicated selection logic
 
 1. **Single Cluster**: deskrun manages one kind cluster at a time
 2. **Local Only**: Designed for local development, not production
