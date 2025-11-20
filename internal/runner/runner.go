@@ -443,10 +443,11 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 }
 
 // generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
-// using ARC's hook extension pattern to inject privileged context into job containers only
+// using ARC's hook extension pattern to inject privileged context into job containers only.
+// Uses kubernetes-novolume mode to avoid PVC complications - ephemeral storage is handled by the hook extension.
 func (m *Manager) generatePrivilegedContainerMode(installation *types.RunnerInstallation, instanceNum int) string {
 	config := `containerMode:
-  type: "kubernetes"
+  type: "kubernetes-novolume"
 template:
   spec:
     securityContext:
@@ -465,16 +466,14 @@ template:
         runAsGroup: 1001
       env:
       - name: ACTIONS_RUNNER_CONTAINER_HOOKS
-        value: "/home/runner/k8s/index.js"
+        value: "/home/runner/k8s-novolume/index.js"
       - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
         value: "/etc/hooks/content"
       - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
         value: "false"`
 
-	// Add volume mounts for work directory and cache paths
+	// Add volume mounts for hook extension
 	config += "\n      volumeMounts:"
-	config += "\n      - name: work"
-	config += "\n        mountPath: /home/runner/_work"
 	config += "\n      - name: hook-extension"
 	config += "\n        mountPath: /etc/hooks"
 	config += "\n        readOnly: true"
@@ -488,8 +487,6 @@ template:
 
 	// Define volumes
 	config += "\n    volumes:"
-	config += "\n    - name: work"
-	config += "\n      emptyDir: {}"
 	config += "\n    - name: hook-extension"
 	config += "\n      configMap:"
 	config += "\n        name: privileged-hook-extension"
@@ -518,10 +515,14 @@ template:
 
 // generateHookExtensionConfigMap generates the hook extension ConfigMap YAML for privileged container mode
 // This ConfigMap contains the PodSpec patch that ARC applies to job containers
+// IMPORTANT: The hook extension should ONLY patch the job container with security context and privileged mounts.
+// It should NOT redefine volumes that are already in the runner template (like "work").
+// The hook extension is a JSON patch that gets merged with the existing pod spec.
 func (m *Manager) generateHookExtensionConfigMap(installation *types.RunnerInstallation, instanceName string) string {
 	// Build the PodSpec patch that will be applied to job pods
 	// This patch adds privileged context and capabilities only to job containers
 	// The "$job" placeholder targets the job container created by the runner
+	// NOTE: We do NOT include "work" volume or "cgroup2" (which may not exist) in the patch
 	hookExtension := `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -556,15 +557,10 @@ data:
             - AUDIT_WRITE
             - AUDIT_CONTROL
         volumeMounts:
-        - name: work
-          mountPath: /home/runner/_work
         - name: sys
           mountPath: /sys
         - name: cgroup
           mountPath: /sys/fs/cgroup
-          mountPropagation: Bidirectional
-        - name: cgroup2
-          mountPath: /sys/fs/cgroup2
           mountPropagation: Bidirectional
         - name: proc
           mountPath: /proc
@@ -583,11 +579,9 @@ data:
 		}
 	}
 
-	// Add volume definitions
+	// Add volume definitions (only for host path mounts, not work which is already in runner template)
 	hookExtension += `
       volumes:
-      - name: work
-        emptyDir: {}
       - name: sys
         hostPath:
           path: /sys
@@ -595,10 +589,6 @@ data:
       - name: cgroup
         hostPath:
           path: /sys/fs/cgroup
-          type: Directory
-      - name: cgroup2
-        hostPath:
-          path: /sys/fs/cgroup2
           type: Directory
       - name: proc
         hostPath:
