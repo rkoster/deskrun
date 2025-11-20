@@ -1,22 +1,28 @@
-.PHONY: build test clean install lint fmt help
+.PHONY: build test clean install lint fmt help runner-update
 
 # Binary name
 BINARY_NAME=deskrun
 INSTALL_PATH=/usr/local/bin
 
+# Runner configuration
+RUNNER_NAME?=test-runner
+GITHUB_REPO?=rkoster/deskrun
+GITHUB_TOKEN?=
+
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  build       - Build the binary"
-	@echo "  build-all   - Build for multiple platforms"
-	@echo "  test        - Run tests"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  install     - Install the binary"
-	@echo "  fmt         - Format code"
-	@echo "  lint        - Run linter"
-	@echo "  check       - Run linter and tests"
-	@echo "  dev         - Build and run the binary"
-	@echo "  help        - Show this help message"
+	@echo "  build           - Build the binary"
+	@echo "  build-all       - Build for multiple platforms"
+	@echo "  test            - Run tests"
+	@echo "  clean           - Clean build artifacts"
+	@echo "  install         - Install the binary"
+	@echo "  fmt             - Format code"
+	@echo "  lint            - Run linter"
+	@echo "  check           - Run linter and tests"
+	@echo "  dev             - Build and run the binary"
+	@echo "  runner-update   - Update test runner with Nix and Docker caching"
+	@echo "  help            - Show this help message"
 
 # Build the binary
 build:
@@ -57,3 +63,29 @@ check: lint test
 # Development build and run
 dev: build
 	./$(BINARY_NAME)
+
+# Update runner with Nix and Docker caching for this repository
+runner-update: build
+	@if [ -z "$(GITHUB_TOKEN)" ]; then \
+		echo "Error: GITHUB_TOKEN is required"; \
+		echo "Usage: make runner-update GITHUB_TOKEN=ghp_xxx"; \
+		echo "Or set GITHUB_TOKEN environment variable"; \
+		exit 1; \
+	fi
+	@echo "Updating runner '$(RUNNER_NAME)' for repository '$(GITHUB_REPO)'..."
+	@echo "Configuration:"
+	@echo "  Runner name: $(RUNNER_NAME)"
+	@echo "  Repository: https://github.com/$(GITHUB_REPO)"
+	@echo "  Mode: cached-privileged-kubernetes"
+	@echo "  Cache paths: /nix/store, /var/lib/docker"
+	@echo ""
+	go run ./cmd/deskrun add $(RUNNER_NAME) \
+		--repository https://github.com/$(GITHUB_REPO) \
+		--mode cached-privileged-kubernetes \
+		--cache /nix/store \
+		--cache /var/lib/docker \
+		--auth-type pat \
+		--auth-value $(GITHUB_TOKEN)
+	@echo ""
+	@echo "Runner added successfully. To deploy, run:"
+	@echo "  deskrun up"
