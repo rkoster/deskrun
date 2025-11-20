@@ -118,3 +118,63 @@ func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateHelmValues_MinMaxRunners(t *testing.T) {
+	tests := []struct {
+		name           string
+		minRunners     int
+		maxRunners     int
+		wantMinRunners string
+		wantMaxRunners string
+	}{
+		{
+			name:           "default min/max",
+			minRunners:     1,
+			maxRunners:     5,
+			wantMinRunners: "minRunners: 1",
+			wantMaxRunners: "maxRunners: 5",
+		},
+		{
+			name:           "zero min runners",
+			minRunners:     0,
+			maxRunners:     10,
+			wantMinRunners: "minRunners: 0",
+			wantMaxRunners: "maxRunners: 10",
+		},
+		{
+			name:           "high max runners",
+			minRunners:     2,
+			maxRunners:     100,
+			wantMinRunners: "minRunners: 2",
+			wantMaxRunners: "maxRunners: 100",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			installation := &types.RunnerInstallation{
+				Name:          "test-runner",
+				Repository:    "https://github.com/owner/repo",
+				ContainerMode: types.ContainerModeKubernetes,
+				MinRunners:    tt.minRunners,
+				MaxRunners:    tt.maxRunners,
+				AuthType:      types.AuthTypePAT,
+				AuthValue:     "test-token",
+			}
+
+			m := &Manager{}
+			got, err := m.generateHelmValues(installation, "test-runner-1", 1)
+			if err != nil {
+				t.Fatalf("generateHelmValues() error = %v", err)
+			}
+
+			if !strings.Contains(got, tt.wantMinRunners) {
+				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantMinRunners, got)
+			}
+
+			if !strings.Contains(got, tt.wantMaxRunners) {
+				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantMaxRunners, got)
+			}
+		})
+	}
+}
