@@ -37,17 +37,38 @@ After introducing cache volumes (commits 6ef5030 onwards):
 ### Temporary Fix Applied
 Disabled cache volume mounts and definitions in `generateHookExtensionConfigMap()` (lines 568-621 in internal/runner/runner.go) to test if the pod initializes successfully without cache volumes.
 
-This will help confirm that cache volumes are indeed the cause of the pod initialization failure.
+### Test Results - RUN WITHOUT CACHE VOLUMES
+**Run 19554987828** - SUCCESSFUL POD INITIALIZATION
+- ✓ Set up job
+- ✓ Initialize containers  
+- ✓ Start Docker daemon
+- Pod came online successfully
+- Docker daemon started successfully via nix-env
+- Failure occurred later in `actions/checkout@v4` step (exit code 127 - different issue)
+
+**CONCLUSION**: Cache volumes ARE the root cause of pod initialization failure.
+
+### Problem Identified
+When cache volumes are added to the hook extension ConfigMap, the pod fails with:
+```
+Error: Pod test-runner-xxx-workflow is unhealthy with phase status Failed: {}
+```
+
+This happens during the Kubernetes admission/validation phase before the pod can even start.
 
 ## Next Steps
 
-1. **Test without cache volumes**: Run workflow to confirm pod comes online
-2. **Identify cache volume issue**: Determine what specifically about the cache volume configuration causes pod init to fail
-3. **Fix cache volume implementation**: Either:
-   - Change how volumes are defined in the hook extension
-   - Use a different mechanism to mount cache paths
-   - Ensure volume mount points don't conflict with system requirements
-4. **Re-enable with fix**: Restore cache volumes with proper configuration
+1. ✓ **Confirm cache volumes are the culprit** - CONFIRMED
+2. **Identify the specific issue with cache volumes**:
+   - Check if paths are invalid or conflicting
+   - Verify volume definitions format in hook extension
+   - Check if DirectoryOrCreate type is causing issues
+   - Verify no duplicate volume definitions
+3. **Fix cache volume implementation**:
+   - Possibly use different volume types
+   - Ensure paths exist on the host before pod creation
+   - Use different mounting strategy
+4. **Re-enable with fix**
 
 ## Files Affected
 
