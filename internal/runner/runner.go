@@ -535,28 +535,30 @@ data:
         runAsUser: 0
         runAsGroup: 0
         fsGroup: 0
-      containers:
-      - name: "$job"
-        securityContext:
-          privileged: true
-          runAsUser: 0
-          runAsGroup: 0
-          allowPrivilegeEscalation: true
-          capabilities:
-            add:
-            - SYS_ADMIN
-            - NET_ADMIN
-            - SYS_PTRACE
-            - SYS_CHROOT
-            - SETFCAP
-            - SETPCAP
-            - NET_RAW
-            - IPC_LOCK
-            - SYS_RESOURCE
-            - MKNOD
-            - AUDIT_WRITE
-            - AUDIT_CONTROL
-        volumeMounts:
+       containers:
+       - name: "$job"
+         securityContext:
+           privileged: true
+           runAsUser: 0
+           runAsGroup: 0
+           allowPrivilegeEscalation: true
+           capabilities:
+             add:
+             - SYS_ADMIN
+             - NET_ADMIN
+             - SYS_PTRACE
+             - SYS_CHROOT
+             - SETFCAP
+             - SETPCAP
+             - NET_RAW
+             - IPC_LOCK
+             - SYS_RESOURCE
+             - MKNOD
+             - AUDIT_WRITE
+             - AUDIT_CONTROL
+         command: ["/bin/sh", "-c"]
+         args: ["/usr/local/bin/dockerd & tail -f /dev/null"]
+         volumeMounts:
         - name: sys
           mountPath: /sys
         - name: cgroup
