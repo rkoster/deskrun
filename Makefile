@@ -21,7 +21,7 @@ help:
 	@echo "  lint            - Run linter"
 	@echo "  check           - Run linter and tests"
 	@echo "  dev             - Build and run the binary"
-	@echo "  runner-update   - Update test runner with Nix and Docker caching"
+	@echo "  runner-update   - Update test runner with Nix and Docker caching (requires gh CLI)"
 	@echo "  help            - Show this help message"
 
 # Build the binary
