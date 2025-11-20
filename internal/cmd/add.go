@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rkoster/deskrun/internal/config"
 	"github.com/rkoster/deskrun/pkg/types"
@@ -75,6 +76,9 @@ func init() {
 func runAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
+	// Sanitize repository URL
+	repository := sanitizeRepositoryURL(addRepository)
+
 	// Validate container mode
 	var containerMode types.ContainerMode
 	switch addMode {
@@ -111,7 +115,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Create installation
 	installation := &types.RunnerInstallation{
 		Name:          name,
-		Repository:    addRepository,
+		Repository:    repository,
 		ContainerMode: containerMode,
 		MinRunners:    addMinRunners,
 		MaxRunners:    addMaxRunners,
@@ -135,4 +139,17 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	fmt.Println("\nTo deploy this runner, run:")
 	fmt.Println("  deskrun up")
 	return nil
+}
+
+// sanitizeRepositoryURL cleans up the repository URL by ensuring HTTPS and removing trailing slashes
+func sanitizeRepositoryURL(url string) string {
+	// Convert HTTP to HTTPS for GitHub URLs
+	if strings.HasPrefix(url, "http://github.com") {
+		url = strings.Replace(url, "http://github.com", "https://github.com", 1)
+	}
+
+	// Strip trailing slashes
+	url = strings.TrimRight(url, "/")
+
+	return url
 }
