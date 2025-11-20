@@ -123,7 +123,7 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 	// For privileged container mode, generate and apply the hook extension ConfigMap
 	if installation.ContainerMode == types.ContainerModePrivileged {
 		fmt.Printf("  Applying hook extension ConfigMap for privileged mode...\n")
-		hookExtension := m.generateHookExtensionConfigMap(installation, instanceName)
+		hookExtension := m.generateHookExtensionConfigMap(installation, instanceName, instanceNum)
 		hookExtensionPath := filepath.Join(tmpDir, "hook-extension.yaml")
 		if err := os.WriteFile(hookExtensionPath, []byte(hookExtension), 0644); err != nil {
 			return fmt.Errorf("failed to write hook extension: %w", err)
@@ -535,7 +535,7 @@ template:
 // IMPORTANT: The hook extension should ONLY patch the job container with security context and privileged mounts.
 // It should NOT redefine volumes that are already in the runner template (like "work").
 // The hook extension is a JSON patch that gets merged with the existing pod spec.
-func (m *Manager) generateHookExtensionConfigMap(installation *types.RunnerInstallation, instanceName string) string {
+func (m *Manager) generateHookExtensionConfigMap(installation *types.RunnerInstallation, instanceName string, instanceNum int) string {
 	// Build the PodSpec patch that will be applied to job pods
 	// This patch adds privileged context and capabilities only to job containers
 	// The "$job" placeholder targets the job container created by the runner
@@ -626,9 +626,18 @@ data:
 
 	// Add cache path volumes
 	if len(installation.CachePaths) > 0 {
-		for _, path := range installation.CachePaths {
+		for i, path := range installation.CachePaths {
+			hostPath := path.HostPath
+			if hostPath == "" {
+				// Generate instance-specific cache path for multi-instance setups
+				if instanceNum > 0 {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
+				} else {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
+				}
+			}
 			hookExtension += fmt.Sprintf("\n      - name: cache-%s\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
-				sanitizeVolumeName(path.MountPath), path.HostPath)
+				sanitizeVolumeName(path.MountPath), hostPath)
 		}
 	}
 
