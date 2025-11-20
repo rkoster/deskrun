@@ -84,6 +84,32 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 		return fmt.Errorf("failed to ensure ARC controller: %w", err)
 	}
 
+	// If instances > 1, create multiple separate runner scale sets
+	instances := installation.Instances
+	if instances < 1 {
+		instances = 1
+	}
+
+	if instances == 1 {
+		// Single instance - use the installation name as-is
+		return m.installInstance(ctx, installation, installation.Name, 0)
+	}
+
+	// Multiple instances - create separate scale sets with numbered suffixes
+	fmt.Printf("Installing %d runner scale set instances for '%s'...\n", instances, installation.Name)
+	for i := 1; i <= instances; i++ {
+		instanceName := fmt.Sprintf("%s-%d", installation.Name, i)
+		if err := m.installInstance(ctx, installation, instanceName, i); err != nil {
+			return fmt.Errorf("failed to install instance %d: %w", i, err)
+		}
+	}
+
+	fmt.Printf("All %d instances installed successfully\n", instances)
+	return nil
+}
+
+// installInstance installs a single runner scale set instance
+func (m *Manager) installInstance(ctx context.Context, installation *types.RunnerInstallation, instanceName string, instanceNum int) error {
 	// Create temporary directory for Helm values
 	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-*")
 	if err != nil {
@@ -91,12 +117,11 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Install runner scale set using Helm
-	fmt.Printf("Installing runner scale set '%s'...\n", installation.Name)
+	fmt.Printf("  Installing runner scale set '%s'...\n", instanceName)
 
-	// Prepare Helm values
+	// Prepare Helm values with instance-specific cache paths
 	valuesPath := filepath.Join(tmpDir, "values.yaml")
-	valuesContent, err := m.generateHelmValues(installation)
+	valuesContent, err := m.generateHelmValues(installation, instanceNum)
 	if err != nil {
 		return fmt.Errorf("failed to generate helm values: %w", err)
 	}
@@ -112,7 +137,7 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 	}
 
 	client := action.NewInstall(actionConfig)
-	client.ReleaseName = installation.Name
+	client.ReleaseName = instanceName
 	client.Namespace = defaultNamespace
 	client.Wait = true
 	client.Timeout = 5 * time.Minute
@@ -121,9 +146,6 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 	// Load the chart from OCI registry
 	chartPath := fmt.Sprintf("%s/%s", runnerScaleSetChartRepo, runnerScaleSetChartName)
 
-	// For OCI charts, we need to use the registry client to pull
-	// Since the chart is in OCI format, we pull it directly using the install client
-	// which will handle OCI pulling internally when we set the repository URL
 	chartRef, err := client.ChartPathOptions.LocateChart(chartPath, cli.New())
 	if err != nil {
 		return fmt.Errorf("failed to locate chart: %w", err)
@@ -148,7 +170,7 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 		return fmt.Errorf("failed to install runner scale set: %w", err)
 	}
 
-	fmt.Println("Runner scale set installed successfully")
+	fmt.Printf("  Instance '%s' installed successfully\n", instanceName)
 	return nil
 }
 
@@ -285,7 +307,7 @@ func containsMiddle(s, substr string) bool {
 }
 
 // generateHelmValues generates Helm values for the runner scale set
-func (m *Manager) generateHelmValues(installation *types.RunnerInstallation) (string, error) {
+func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, instanceNum int) (string, error) {
 	// Determine authentication method
 	var githubConfigSecret string
 	if installation.AuthType == types.AuthTypePAT {
@@ -306,7 +328,7 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation) (st
 		containerModeConfig = `containerMode:
   type: "kubernetes"`
 	case types.ContainerModePrivileged:
-		containerModeConfig = m.generatePrivilegedContainerMode(installation)
+		containerModeConfig = m.generatePrivilegedContainerMode(installation, instanceNum)
 	case types.ContainerModeDinD:
 		containerModeConfig = `containerMode:
   type: "dind"`
@@ -327,7 +349,7 @@ maxRunners: %d
 }
 
 // generatePrivilegedContainerMode generates the privileged container mode configuration
-func (m *Manager) generatePrivilegedContainerMode(installation *types.RunnerInstallation) string {
+func (m *Manager) generatePrivilegedContainerMode(installation *types.RunnerInstallation, instanceNum int) string {
 	config := `containerMode:
   type: "kubernetes"
 template:
@@ -378,7 +400,12 @@ template:
 		for i, path := range installation.CachePaths {
 			hostPath := path.HostPath
 			if hostPath == "" {
-				hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
+				// Generate instance-specific cache path for multi-instance setups
+				if instanceNum > 0 {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
+				} else {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
+				}
 			}
 			config += fmt.Sprintf("\n    - name: cache-%d", i)
 			config += "\n      hostPath:"

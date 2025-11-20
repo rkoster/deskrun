@@ -68,6 +68,7 @@ func TestRunnerInstallation(t *testing.T) {
 		ContainerMode: ContainerModeKubernetes,
 		MinRunners:    1,
 		MaxRunners:    5,
+		Instances:     1,
 		CachePaths: []CachePath{
 			{MountPath: "/nix/store", HostPath: "/tmp/nix"},
 		},
@@ -81,8 +82,38 @@ func TestRunnerInstallation(t *testing.T) {
 	if installation.ContainerMode != ContainerModeKubernetes {
 		t.Errorf("ContainerMode = %v, want kubernetes", installation.ContainerMode)
 	}
+	if installation.Instances != 1 {
+		t.Errorf("Instances = %v, want 1", installation.Instances)
+	}
 	if len(installation.CachePaths) != 1 {
 		t.Errorf("CachePaths length = %v, want 1", len(installation.CachePaths))
+	}
+}
+
+func TestRunnerInstallationMultipleInstances(t *testing.T) {
+	installation := &RunnerInstallation{
+		Name:          "multi-runner",
+		Repository:    "https://github.com/owner/repo",
+		ContainerMode: ContainerModePrivileged,
+		MinRunners:    0,
+		MaxRunners:    1,
+		Instances:     3,
+		CachePaths: []CachePath{
+			{MountPath: "/nix/store", HostPath: ""},
+			{MountPath: "/var/lib/docker", HostPath: ""},
+		},
+		AuthType:  AuthTypePAT,
+		AuthValue: "ghp_test",
+	}
+
+	if installation.Instances != 3 {
+		t.Errorf("Instances = %v, want 3", installation.Instances)
+	}
+	if len(installation.CachePaths) != 2 {
+		t.Errorf("CachePaths length = %v, want 2", len(installation.CachePaths))
+	}
+	if installation.MaxRunners != 1 {
+		t.Errorf("MaxRunners = %v, want 1 for multi-instance setup", installation.MaxRunners)
 	}
 }
 

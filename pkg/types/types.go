@@ -19,6 +19,7 @@ type RunnerInstallation struct {
 	ContainerMode ContainerMode
 	MinRunners    int
 	MaxRunners    int
+	Instances     int // Number of separate runner scale set instances to create
 	CachePaths    []CachePath
 	AuthType      AuthType
 	AuthValue     string

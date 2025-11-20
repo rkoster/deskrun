@@ -14,6 +14,7 @@ var (
 	addMode       string
 	addMinRunners int
 	addMaxRunners int
+	addInstances  int
 	addAuthType   string
 	addAuthValue  string
 	addCachePaths []string
@@ -63,6 +64,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addMode, "mode", "m", "kubernetes", "Container mode (kubernetes, cached-privileged-kubernetes, dind)")
 	addCmd.Flags().IntVar(&addMinRunners, "min-runners", 1, "Minimum number of runners")
 	addCmd.Flags().IntVar(&addMaxRunners, "max-runners", 5, "Maximum number of runners")
+	addCmd.Flags().IntVar(&addInstances, "instances", 1, "Number of separate runner scale set instances (for cache isolation)")
 	addCmd.Flags().StringVar(&addAuthType, "auth-type", "pat", "Authentication type (pat, github-app)")
 	addCmd.Flags().StringVar(&addAuthValue, "auth-value", "", "Authentication value (PAT token or GitHub App private key)")
 	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Cache paths to mount (can be specified multiple times)")
@@ -112,6 +114,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Validate instances
+	if addInstances < 1 {
+		return fmt.Errorf("instances must be at least 1")
+	}
+
 	// Create installation
 	installation := &types.RunnerInstallation{
 		Name:          name,
@@ -119,6 +126,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		ContainerMode: containerMode,
 		MinRunners:    addMinRunners,
 		MaxRunners:    addMaxRunners,
+		Instances:     addInstances,
 		CachePaths:    cachePaths,
 		AuthType:      authType,
 		AuthValue:     addAuthValue,

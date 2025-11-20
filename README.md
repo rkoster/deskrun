@@ -54,6 +54,17 @@ deskrun add nix-runner \
   --auth-type pat \
   --auth-value ghp_xxxxxxxxxxxxx
 
+# Multiple instances for cache isolation (creates runner-1, runner-2, runner-3)
+deskrun add multi-runner \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --cache /nix/store \
+  --cache /var/lib/docker \
+  --instances 3 \
+  --max-runners 1 \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+
 # Docker-in-Docker runner
 deskrun add dind-runner \
   --repository https://github.com/owner/repo \
@@ -132,6 +143,50 @@ Cache paths are automatically partitioned per installation at:
 ```
 /tmp/github-runner-cache/{installation-name}/cache-{index}
 ```
+
+## Multiple Instances
+
+For better cache isolation and deterministic cache affinity, you can create multiple separate runner scale set instances:
+
+```bash
+deskrun add my-runner \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --cache /nix/store \
+  --cache /var/lib/docker \
+  --instances 3 \
+  --max-runners 1 \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+```
+
+This creates 3 separate AutoscalingRunnerSets:
+- `my-runner-1`
+- `my-runner-2`
+- `my-runner-3`
+
+Each instance:
+- Has dedicated cache partitions (no coordination overhead)
+- Scales independently (0-1 runners per instance)
+- Provides deterministic cache behavior
+
+### Workflow Selection
+
+Use issue number modulo for deterministic distribution:
+
+```yaml
+jobs:
+  build:
+    runs-on: my-runner-${{ github.event.issue.number % 3 + 1 }}
+    steps:
+      - run: echo "Running on deterministic instance"
+```
+
+**Benefits:**
+- Simplified cache management (no locking required)
+- Better cache isolation and predictable performance
+- Issue-based cache affinity for related workflows
+- Improved cache hit rates for follow-up work
 
 ## Authentication
 
