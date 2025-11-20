@@ -35,21 +35,31 @@ authentication credentials. Use different container modes based on your needs:
 - cached-privileged-kubernetes: For repositories needing systemd, nested Docker, or Nix
 - dind: Docker-in-Docker mode for full Docker access
 
+For scaling runners, you have two options:
+1. Single instance with --max-runners: Creates one runner scale set that scales up/down
+2. Multiple instances with --instances: Creates separate runner scale sets (each with min=1, max=1)
+   Each instance has its own cache paths for better cache isolation.
+
 Examples:
-  # Add a standard runner
+  # Add a standard runner (single instance, scales 1-5)
   deskrun add my-runner --repository https://github.com/owner/repo --auth-type pat --auth-value ghp_xxx
 
-  # Add a privileged runner with Nix cache
+  # Add a privileged runner with Nix cache (single instance, scales 1-5)
   deskrun add nix-runner \
     --repository https://github.com/owner/repo \
     --mode cached-privileged-kubernetes \
     --cache /nix/store \
+    --max-runners 5 \
     --auth-type pat --auth-value ghp_xxx
 
-  # Add a DinD runner
-  deskrun add dind-runner \
+  # Add a privileged runner with 3 instances for cache isolation
+  # Each instance runs exactly 1 runner with dedicated cache paths
+  deskrun add nix-runner \
     --repository https://github.com/owner/repo \
-    --mode dind \
+    --mode cached-privileged-kubernetes \
+    --cache /nix/store \
+    --cache /var/lib/docker \
+    --instances 3 \
     --auth-type pat --auth-value ghp_xxx
 
   # After adding, deploy the configuration
@@ -62,9 +72,9 @@ Examples:
 func init() {
 	addCmd.Flags().StringVarP(&addRepository, "repository", "r", "", "GitHub repository URL (required)")
 	addCmd.Flags().StringVarP(&addMode, "mode", "m", "kubernetes", "Container mode (kubernetes, cached-privileged-kubernetes, dind)")
-	addCmd.Flags().IntVar(&addMinRunners, "min-runners", 1, "Minimum number of runners")
-	addCmd.Flags().IntVar(&addMaxRunners, "max-runners", 5, "Maximum number of runners")
-	addCmd.Flags().IntVar(&addInstances, "instances", 1, "Number of separate runner scale set instances (for cache isolation)")
+	addCmd.Flags().IntVar(&addMinRunners, "min-runners", 1, "Minimum number of runners (ignored when using --instances)")
+	addCmd.Flags().IntVar(&addMaxRunners, "max-runners", 5, "Maximum number of runners (ignored when using --instances)")
+	addCmd.Flags().IntVar(&addInstances, "instances", 1, "Number of separate runner scale set instances (each will have min=1, max=1 for cache isolation)")
 	addCmd.Flags().StringVar(&addAuthType, "auth-type", "pat", "Authentication type (pat, github-app)")
 	addCmd.Flags().StringVar(&addAuthValue, "auth-value", "", "Authentication value (PAT token or GitHub App private key)")
 	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Cache paths to mount (can be specified multiple times)")
@@ -119,13 +129,22 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// When using multiple instances, automatically set minRunners and maxRunners to 1
+	// for each instance (no point in scaling within an instance if we're scaling via instances)
+	minRunners := addMinRunners
+	maxRunners := addMaxRunners
+	if addInstances > 1 {
+		minRunners = 1
+		maxRunners = 1
+	}
+
 	// Create installation
 	installation := &types.RunnerInstallation{
 		Name:          name,
 		Repository:    repository,
 		ContainerMode: containerMode,
-		MinRunners:    addMinRunners,
-		MaxRunners:    addMaxRunners,
+		MinRunners:    minRunners,
+		MaxRunners:    maxRunners,
 		Instances:     addInstances,
 		CachePaths:    cachePaths,
 		AuthType:      authType,
@@ -154,17 +173,6 @@ func validateAddParams(instances, maxRunners int, containerMode types.ContainerM
 	// Validate instances
 	if instances < 1 {
 		return fmt.Errorf("instances must be at least 1")
-	}
-
-	// Validate instances and max-runners combination
-	if instances > 1 && maxRunners > 1 {
-		return fmt.Errorf("cannot use --instances > 1 with --max-runners > 1; use --instances for scaling with multiple separate runner scale sets, or use --max-runners for scaling within a single runner scale set")
-	}
-
-	// For cached-privileged-kubernetes mode, force max-runners to 1
-	// This mode should only scale via instances for proper cache isolation
-	if containerMode == types.ContainerModePrivileged && maxRunners > 1 {
-		return fmt.Errorf("cached-privileged-kubernetes mode requires --max-runners=1; use --instances to scale instead for proper cache isolation")
 	}
 
 	return nil
