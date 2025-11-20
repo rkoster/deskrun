@@ -336,50 +336,77 @@ func containsMiddle(s, substr string) bool {
 
 // generateHelmValues generates Helm values for the runner scale set
 func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, instanceName string, instanceNum int) (string, error) {
+	// Build the values map
+	values := map[string]interface{}{
+		"githubConfigUrl":    installation.Repository,
+		"minRunners":         installation.MinRunners,
+		"maxRunners":         installation.MaxRunners,
+		"runnerScaleSetName": instanceName,
+	}
+
 	// Determine authentication method
-	var githubConfigSecret string
 	if installation.AuthType == types.AuthTypePAT {
-		githubConfigSecret = fmt.Sprintf(`githubConfigSecret:
-  github_token: "%s"`, installation.AuthValue)
+		values["githubConfigSecret"] = map[string]interface{}{
+			"github_token": installation.AuthValue,
+		}
 	} else {
-		githubConfigSecret = fmt.Sprintf(`githubConfigSecret:
-  github_app_id: ""
-  github_app_installation_id: ""
-  github_app_private_key: |
-    %s`, installation.AuthValue)
+		values["githubConfigSecret"] = map[string]interface{}{
+			"github_app_id":              "",
+			"github_app_installation_id": "",
+			"github_app_private_key":     installation.AuthValue,
+		}
 	}
 
 	// Build container mode configuration
-	var containerModeConfig string
+	var containerModeConfig map[string]interface{}
 	switch installation.ContainerMode {
 	case types.ContainerModeKubernetes:
-		containerModeConfig = `containerMode:
-  type: "kubernetes"`
+		containerModeConfig = map[string]interface{}{
+			"type": "kubernetes",
+		}
 	case types.ContainerModePrivileged:
-		containerModeConfig = m.generatePrivilegedContainerMode(installation, instanceNum)
+		// For privileged mode, we need to parse the generated YAML string into a map
+		containerModeYAML := m.generatePrivilegedContainerMode(installation, instanceNum)
+		// The function returns the full "containerMode: ..." structure, so parse it into a temp object
+		tempConfig := make(map[string]interface{})
+		if err := yaml.Unmarshal([]byte(containerModeYAML), &tempConfig); err != nil {
+			return "", fmt.Errorf("failed to parse privileged container mode YAML: %w", err)
+		}
+		// Extract the containerMode value from the parsed YAML
+		if cm, ok := tempConfig["containerMode"]; ok {
+			if cmMap, ok := cm.(map[string]interface{}); ok {
+				containerModeConfig = cmMap
+			} else {
+				return "", fmt.Errorf("containerMode is not a map: %T", cm)
+			}
+		} else {
+			return "", fmt.Errorf("containerMode not found in generated YAML")
+		}
+		// Also add template and other top-level fields from the privileged config
+		if template, ok := tempConfig["template"]; ok {
+			// For privileged mode, we need to merge both containerMode and template at the top level
+			// Reconstruct containerModeConfig to include the template
+			if tempCM, ok := tempConfig["containerMode"].(map[string]interface{}); ok {
+				containerModeConfig = tempCM
+			}
+			values["template"] = template
+		}
 	case types.ContainerModeDinD:
-		containerModeConfig = `containerMode:
-  type: "dind"`
+		containerModeConfig = map[string]interface{}{
+			"type": "dind",
+		}
 	default:
 		return "", fmt.Errorf("unsupported container mode: %s", installation.ContainerMode)
 	}
+	values["containerMode"] = containerModeConfig
 
-	// Add runner labels so workflows can target these runners
-	// Use the instance name to ensure unique ServiceAccount names across instances
-	runnerLabels := fmt.Sprintf(`runnerScaleSetName: "%s"`, instanceName)
+	// Convert to YAML
+	yamlData, err := yaml.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal values to YAML: %w", err)
+	}
 
-	values := fmt.Sprintf(`githubConfigUrl: "%s"
-minRunners: %d
-maxRunners: %d
-%s
-
-%s
-
-%s
-`, installation.Repository, installation.MinRunners, installation.MaxRunners,
-		githubConfigSecret, runnerLabels, containerModeConfig)
-
-	return values, nil
+	return string(yamlData), nil
 }
 
 // generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
