@@ -1,0 +1,23 @@
+name: Test Self-Hosted Runner
+
+on:
+  push:
+    branches: [copilot/implement-github-actions-runner]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run simple test
+        run: |
+          echo "Running on self-hosted runner"
+          echo "Hostname: $(hostname)"
+          echo "Username: $(whoami)"
+          id
+      - name: Test privileged mode
+        run: |
+          echo "Testing privileged mode access"
+          docker ps 2>/dev/null && echo "Docker is available" || echo "Docker not available"
+          nix --version 2>/dev/null && echo "Nix is available" || echo "Nix not available"
