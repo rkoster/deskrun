@@ -5,6 +5,10 @@ on:
     branches: [copilot/implement-github-actions-runner]
   workflow_dispatch:
 
+# Note: To enable Nix store caching for faster builds, add `--cache /nix/store` 
+# when installing the runner with:
+# deskrun add test-runner --repository <url> --mode cached-privileged-kubernetes --cache /nix/store --auth-type pat --auth-value <token>
+
 jobs:
   test:
     runs-on: test-runner
@@ -72,24 +76,15 @@ jobs:
               fi
           done
 
-          echo "Docker daemon started successfully"
+           echo "Docker daemon started successfully"
 
-      - uses: actions/checkout@v4
-
-      - name: Run basic test
-        run: |
-          echo "Running on ARC scale set runner in container"
-          echo "Hostname: $(hostname)"
-          echo "Username: $(whoami)"
-          id
-
-      - name: Test Docker availability
-        run: |
-          export DOCKER_HOST=unix:///tmp/dind/docker.sock
-          echo "Testing Docker daemon availability..."
-          docker info
-          docker ps
-          echo "Docker is working!"
+       - name: Test Docker availability
+         run: |
+           export DOCKER_HOST=unix:///tmp/dind/docker.sock
+           echo "Testing Docker daemon availability..."
+           docker info
+           docker ps
+           echo "Docker is working!"
 
       - name: Test basic Docker operations
         run: |
