@@ -14,7 +14,9 @@ jobs:
     steps:
       - name: Install Docker via nix
         run: |
+          echo "Installing Docker via nix-env..."
           nix-env -i docker
+          echo "Docker installation complete"
           
       - name: Check container capabilities
         run: |
@@ -24,7 +26,7 @@ jobs:
           echo "Groups: $(groups)"
           echo ""
           echo "=== Checking privileged mode ==="
-          cat /proc/self/status | grep Cap
+          cat /proc/self/status | grep Cap || true
           echo ""
           echo "=== Checking cgroups ==="
           mount | grep cgroup || echo "No cgroup mounts found"
@@ -39,7 +41,10 @@ jobs:
       - name: Start Docker daemon
         run: |
           echo "Starting Docker daemon..."
-          dockerd --storage-driver overlay2 > /tmp/docker.log 2>&1 &
+          mkdir -p /var/run/docker
+          dockerd --storage-driver overlay2 --host unix:///var/run/docker.sock > /tmp/docker.log 2>&1 &
+          DOCKERD_PID=$!
+          echo "Docker daemon started with PID: $DOCKERD_PID"
           
           echo "Waiting for Docker daemon to be ready..."
           timeout=120
@@ -52,6 +57,7 @@ jobs:
               if [ "$timeout" -le 0 ]; then
                   echo "Error: Docker daemon failed to start within 120 seconds"
                   docker info || true
+                  echo "=== Docker daemon logs ==="
                   cat /tmp/docker.log || true
                   exit 1
               fi
@@ -61,17 +67,25 @@ jobs:
           docker info
 
       - uses: actions/checkout@v4
-      - name: Run simple test
+      
+      - name: Run basic test
         run: |
           echo "Running on ARC scale set runner in container"
           echo "Hostname: $(hostname)"
           echo "Username: $(whoami)"
           id
           
-      - name: Test Docker in container
+      - name: Test Docker availability
         run: |
-          echo "Testing Docker availability"
+          echo "Testing Docker daemon availability..."
           docker info
           docker ps
           echo "Docker is working!"
+          
+      - name: Test basic Docker operations
+        run: |
+          echo "Testing basic Docker operations..."
+          docker pull alpine:latest --quiet || docker pull alpine:latest
+          docker run --rm alpine:latest echo "Docker run successful!"
+          echo "All Docker tests passed!"
 
