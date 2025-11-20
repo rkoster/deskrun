@@ -554,27 +554,25 @@ data:
          fsGroup: 0
        containers:
        - name: "$job"
-         securityContext:
-           privileged: true
-           runAsUser: 0
-           runAsGroup: 0
-           allowPrivilegeEscalation: true
-           capabilities:
-             add:
-             - SYS_ADMIN
-             - NET_ADMIN
-             - SYS_PTRACE
-             - SYS_CHROOT
-             - SETFCAP
-             - SETPCAP
-             - NET_RAW
-             - IPC_LOCK
-             - SYS_RESOURCE
-             - MKNOD
-             - AUDIT_WRITE
-             - AUDIT_CONTROL
-          command: ["/bin/sh", "-c"]
-          args: ["/usr/local/bin/dockerd > /tmp/docker.log 2>&1 & sleep 2 && timeout 30 sh -c 'until docker info > /dev/null 2>&1; do sleep 0.5; done' && tail -f /dev/null"]
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+              - SYS_ADMIN
+              - NET_ADMIN
+              - SYS_PTRACE
+              - SYS_CHROOT
+              - SETFCAP
+              - SETPCAP
+              - NET_RAW
+              - IPC_LOCK
+              - SYS_RESOURCE
+              - MKNOD
+              - AUDIT_WRITE
+              - AUDIT_CONTROL
           volumeMounts:
          - name: sys
            mountPath: /sys
