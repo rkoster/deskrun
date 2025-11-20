@@ -8,16 +8,26 @@ on:
 jobs:
   test:
     runs-on: test-runner
+    container:
+      image: ubuntu:22.04
+      options: --privileged
     steps:
       - uses: actions/checkout@v4
       - name: Run simple test
         run: |
-          echo "Running on ARC scale set runner"
+          echo "Running on ARC scale set runner in container"
           echo "Hostname: $(hostname)"
           echo "Username: $(whoami)"
           id
-      - name: Test privileged mode
+      - name: Test container environment
         run: |
-          echo "Testing privileged mode access"
+          echo "Testing container environment"
+          cat /etc/os-release
+          echo "---"
+          apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
+          curl --version
+      - name: Test Docker in container
+        run: |
+          echo "Testing Docker availability"
           docker ps 2>/dev/null && echo "Docker is available" || echo "Docker not available"
-          nix --version 2>/dev/null && echo "Nix is available" || echo "Nix not available"
+          docker --version 2>/dev/null || echo "Docker not installed"
