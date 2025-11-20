@@ -547,46 +547,46 @@ metadata:
   namespace: ` + defaultNamespace + `
 data:
   content: |
-     spec:
-       securityContext:
-         runAsUser: 0
-         runAsGroup: 0
-         fsGroup: 0
-       containers:
-       - name: "$job"
-          securityContext:
-            privileged: true
-            runAsUser: 0
-            runAsGroup: 0
-            allowPrivilegeEscalation: true
-            capabilities:
-              add:
-              - SYS_ADMIN
-              - NET_ADMIN
-              - SYS_PTRACE
-              - SYS_CHROOT
-              - SETFCAP
-              - SETPCAP
-              - NET_RAW
-              - IPC_LOCK
-              - SYS_RESOURCE
-              - MKNOD
-              - AUDIT_WRITE
-              - AUDIT_CONTROL
-          volumeMounts:
-         - name: sys
-           mountPath: /sys
-         - name: cgroup
-           mountPath: /sys/fs/cgroup
-           mountPropagation: Bidirectional
-         - name: proc
-           mountPath: /proc
-         - name: dev
-           mountPath: /dev
-         - name: dev-pts
-           mountPath: /dev/pts
-         - name: shm
-           mountPath: /dev/shm`
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: "$job"
+        securityContext:
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            - NET_ADMIN
+            - SYS_PTRACE
+            - SYS_CHROOT
+            - SETFCAP
+            - SETPCAP
+            - NET_RAW
+            - IPC_LOCK
+            - SYS_RESOURCE
+            - MKNOD
+            - AUDIT_WRITE
+            - AUDIT_CONTROL
+        volumeMounts:
+        - name: sys
+          mountPath: /sys
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
+          mountPropagation: Bidirectional
+        - name: proc
+          mountPath: /proc
+        - name: dev
+          mountPath: /dev
+        - name: dev-pts
+          mountPath: /dev/pts
+        - name: shm
+          mountPath: /dev/shm`
 
 	// Add cache path volume mounts
 	if len(installation.CachePaths) > 0 {
@@ -598,31 +598,31 @@ data:
 
 	// Add volume definitions (only for host path mounts, not work which is already in runner template)
 	hookExtension += `
-       volumes:
-       - name: sys
-         hostPath:
-           path: /sys
-           type: Directory
-       - name: cgroup
-         hostPath:
-           path: /sys/fs/cgroup
-           type: Directory
-       - name: proc
-         hostPath:
-           path: /proc
-           type: Directory
-       - name: dev
-         hostPath:
-           path: /dev
-           type: Directory
-       - name: dev-pts
-         hostPath:
-           path: /dev/pts
-           type: Directory
-       - name: shm
-         hostPath:
-           path: /dev/shm
-           type: Directory`
+      volumes:
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: dev-pts
+        hostPath:
+          path: /dev/pts
+          type: Directory
+      - name: shm
+        hostPath:
+          path: /dev/shm
+          type: Directory`
 
 	// Add cache path volumes
 	if len(installation.CachePaths) > 0 {
