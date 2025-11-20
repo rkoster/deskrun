@@ -489,43 +489,20 @@ template:
       - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
         value: "false"`
 
-	// Add volume mounts for hook extension
+	// Add volume mounts for hook extension only
+	// Cache volumes are only needed for job containers and are defined in the hook extension
 	config += "\n      volumeMounts:"
 	config += "\n      - name: hook-extension"
 	config += "\n        mountPath: /etc/hooks"
 	config += "\n        readOnly: true"
 
-	if len(installation.CachePaths) > 0 {
-		for i, path := range installation.CachePaths {
-			config += fmt.Sprintf("\n      - name: cache-%d", i)
-			config += fmt.Sprintf("\n        mountPath: %s", path.MountPath)
-		}
-	}
-
-	// Define volumes
+	// Define only the hook-extension volume
+	// Cache volumes are only needed for job containers and are defined in the hook extension
 	config += "\n    volumes:"
 	config += "\n    - name: hook-extension"
 	config += "\n      configMap:"
 	config += "\n        name: privileged-hook-extension"
 	config += "\n        defaultMode: 0755"
-
-	if len(installation.CachePaths) > 0 {
-		for i, path := range installation.CachePaths {
-			hostPath := path.HostPath
-			if hostPath == "" {
-				// Generate instance-specific cache path for multi-instance setups
-				if instanceNum > 0 {
-					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
-				} else {
-					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
-				}
-			}
-			config += fmt.Sprintf("\n    - name: cache-%d", i)
-			config += "\n      hostPath:"
-			config += fmt.Sprintf("\n        path: %s", hostPath)
-			config += "\n        type: DirectoryOrCreate"
-		}
-	}
 
 	return config
 }
@@ -589,7 +566,7 @@ data:
           mountPath: /dev/shm`
 
 	// Add cache path volume mounts to job container
-	// Note: These volumes are already defined in the runner template, so we just mount them here
+	// Note: These volumes are defined in the hook extension, not the runner template
 	if len(installation.CachePaths) > 0 {
 		for i := range installation.CachePaths {
 			hookExtension += fmt.Sprintf("\n        - name: cache-%d\n          mountPath: %s",
@@ -597,8 +574,8 @@ data:
 		}
 	}
 
-	// Add volume definitions (only for system mounts needed by job container, NOT cache volumes)
-	// Cache volumes are already defined in the runner template and will be merged automatically
+	// Add volume definitions (system mounts + cache volumes needed by job container)
+	// Cache volumes are only needed for job containers, not the runner container
 	hookExtension += `
       volumes:
       - name: sys
@@ -626,8 +603,22 @@ data:
           path: /dev/shm
           type: Directory`
 
-	// NOTE: We do NOT include cache volumes here as they are already defined in the runner template
-	// and will be merged with this patch by ARC. Including them would cause validation errors.
+	// Add cache path volumes to hook extension
+	if len(installation.CachePaths) > 0 {
+		for i, path := range installation.CachePaths {
+			hostPath := path.HostPath
+			if hostPath == "" {
+				// Generate instance-specific cache path for multi-instance setups
+				if instanceNum > 0 {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
+				} else {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
+				}
+			}
+			hookExtension += fmt.Sprintf("\n      - name: cache-%d\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
+				i, hostPath)
+		}
+	}
 
 	return hookExtension
 }
