@@ -79,6 +79,10 @@ runner-update: build
 	@echo "  Mode: cached-privileged-kubernetes"
 	@echo "  Cache paths: /nix/store, /var/lib/docker"
 	@echo ""
+	@echo "Step 1: Bringing down existing runner..."
+	go run ./cmd/deskrun down $(RUNNER_NAME) || true
+	@echo ""
+	@echo "Step 2: Adding updated runner configuration..."
 	go run ./cmd/deskrun add $(RUNNER_NAME) \
 		--repository https://github.com/$(GITHUB_REPO) \
 		--mode cached-privileged-kubernetes \
@@ -87,5 +91,7 @@ runner-update: build
 		--auth-type pat \
 		--auth-value $(GITHUB_TOKEN)
 	@echo ""
-	@echo "Runner added successfully. To deploy, run:"
-	@echo "  deskrun up"
+	@echo "Step 3: Deploying updated runner..."
+	go run ./cmd/deskrun up
+	@echo ""
+	@echo "Runner updated successfully!"
