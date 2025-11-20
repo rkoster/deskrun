@@ -77,15 +77,15 @@ jobs:
               fi
           done
 
-           echo "Docker daemon started successfully"
+          echo "Docker daemon started successfully"
 
-       - name: Test Docker availability
-         run: |
-           export DOCKER_HOST=unix:///tmp/dind/docker.sock
-           echo "Testing Docker daemon availability..."
-           docker info
-           docker ps
-           echo "Docker is working!"
+      - name: Test Docker availability
+        run: |
+          export DOCKER_HOST=unix:///tmp/dind/docker.sock
+          echo "Testing Docker daemon availability..."
+          docker info
+          docker ps
+          echo "Docker is working!"
 
       - name: Test basic Docker operations
         run: |
@@ -94,4 +94,3 @@ jobs:
           docker pull alpine:latest --quiet || docker pull alpine:latest
           docker run --rm alpine:latest echo "Docker run successful!"
           echo "All Docker tests passed!"
-
