@@ -396,6 +396,7 @@ template:
     containers:
     - name: runner
       image: "ghcr.io/actions/actions-runner:latest"
+      command: ["/home/runner/run.sh"]
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: false
@@ -406,7 +407,7 @@ template:
       - name: ACTIONS_RUNNER_CONTAINER_HOOKS
         value: "/home/runner/k8s/index.js"
       - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
-        value: "/etc/hooks/hook-extension.yaml"
+        value: "/etc/hooks/content"
       - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
         value: "false"`
 
@@ -467,7 +468,7 @@ metadata:
   name: privileged-hook-extension
   namespace: ` + defaultNamespace + `
 data:
-  hook-extension.yaml: |
+  content: |
     spec:
       securityContext:
         runAsUser: 0
@@ -501,8 +502,10 @@ data:
           mountPath: /sys
         - name: cgroup
           mountPath: /sys/fs/cgroup
+          mountPropagation: Bidirectional
         - name: cgroup2
           mountPath: /sys/fs/cgroup2
+          mountPropagation: Bidirectional
         - name: proc
           mountPath: /proc
         - name: dev
