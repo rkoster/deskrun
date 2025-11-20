@@ -14,12 +14,21 @@ jobs:
   test:
     runs-on: test-runner
     container:
-      image: ghcr.io/nixos/nix:latest
+      # Use a standard Linux image with bash and coreutils available
+      # We'll install nix and docker in the container
+      image: ubuntu:latest
       options: --privileged
     steps:
-      - name: Install coreutils (provides tail for container initialization)
+      - name: Install nix and docker
         run: |
-          nix-env -i coreutils
+          apt-get update
+          apt-get install -y curl sudo
+          # Install nix
+          curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+          
+          # Install docker
+          apt-get install -y docker.io
       - name: Start Docker daemon
         run: |
           # Create necessary directories
@@ -29,9 +38,7 @@ jobs:
           mkdir -p /etc/docker
           mkdir -p /var/log
 
-          # Install Docker via nix
-          nix-env -i docker
-
+          # Docker is already installed via apt-get, just configure it
           # Write Docker daemon configuration with vfs driver
           # (vfs driver works better in Kubernetes environments)
           cat > /etc/docker/daemon.json <<'EOF'
