@@ -10,8 +10,70 @@ jobs:
     runs-on: test-runner
     container:
       image: ubuntu:22.04
-      options: --privileged
+      options: --privileged --init
     steps:
+      - name: Start Docker daemon
+        run: |
+          # Create necessary directories
+          mkdir -p /var/lib/docker
+          mkdir -p /var/run
+          mkdir -p /tmp/dind
+          mkdir -p /etc/docker
+          mkdir -p /var/log
+
+          # Write Docker daemon configuration WITHOUT systemd driver
+          # (systemd driver requires systemd running, but we have docker-init/tini)
+          cat > /etc/docker/daemon.json <<'EOF'
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "100m"
+            },
+            "storage-driver": "vfs"
+          }
+          EOF
+
+          # Enable cgroup v2 controller delegation for nested containers
+          echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || {
+            # If direct write fails, move processes to init.scope first
+            mkdir -p /sys/fs/cgroup/init.scope
+            cp /sys/fs/cgroup/cgroup.procs /tmp/cgroup-pids.txt
+            while IFS= read -r pid; do
+              echo "$pid" > /sys/fs/cgroup/init.scope/cgroup.procs 2>/dev/null || true
+            done < /tmp/cgroup-pids.txt
+            rm -f /tmp/cgroup-pids.txt
+            # Retry delegation after moving processes
+            echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
+          }
+
+          # Start dockerd in the background with custom socket path
+          dockerd \
+              --host=unix:///tmp/dind/docker.sock \
+              --data-root=/var/lib/docker \
+              --log-level=error \
+              --insecure-registry=0.0.0.0/0 \
+              >/var/log/dockerd.log 2>&1 &
+
+          # Store dockerd PID for cleanup
+          DOCKERD_PID=$!
+          if [ -n "$GITHUB_ENV" ] && [ -w "$GITHUB_ENV" ]; then
+            echo "DOCKERD_PID=$DOCKERD_PID" >> "$GITHUB_ENV"
+          fi
+
+          # Wait for docker daemon to be ready
+          echo "Waiting for Docker daemon to start..."
+          timeout=30
+          while ! DOCKER_HOST=unix:///tmp/dind/docker.sock docker info >/dev/null 2>&1; do
+              sleep 1
+              timeout=$((timeout - 1))
+              if [ "$timeout" -le 0 ]; then
+                  echo "Error: Docker daemon failed to start within 30 seconds"
+                  exit 1
+              fi
+          done
+
+          echo "Docker daemon started successfully"
+
       - uses: actions/checkout@v4
       - name: Run simple test
         run: |
@@ -28,6 +90,8 @@ jobs:
           curl --version
       - name: Test Docker in container
         run: |
+          export DOCKER_HOST=unix:///tmp/dind/docker.sock
           echo "Testing Docker availability"
-          docker ps 2>/dev/null && echo "Docker is available" || echo "Docker not available"
-          docker --version 2>/dev/null || echo "Docker not installed"
+          docker info
+          docker ps
+          echo "Docker is working!"
