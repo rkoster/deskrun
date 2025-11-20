@@ -12,6 +12,15 @@ jobs:
       image: ubuntu:22.04
       options: --privileged --init
     steps:
+      - name: Install Docker in container
+        run: |
+          echo "=== Installing Docker ==="
+          apt-get update -qq
+          apt-get install -y -qq docker.io
+          echo "Docker installed successfully"
+          docker --version
+          dockerd --version
+          
       - name: Check container capabilities
         run: |
           echo "=== Container Diagnostics ==="
