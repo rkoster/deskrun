@@ -395,6 +395,7 @@ template:
       fsGroup: 1001
     containers:
     - name: runner
+      image: "ghcr.io/actions/actions-runner:latest"
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: false
