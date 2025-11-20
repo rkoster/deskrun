@@ -55,13 +55,13 @@ deskrun add nix-runner \
   --auth-value ghp_xxxxxxxxxxxxx
 
 # Multiple instances for cache isolation (creates runner-1, runner-2, runner-3)
+# Each instance automatically gets min=1, max=1 for proper cache isolation
 deskrun add multi-runner \
   --repository https://github.com/owner/repo \
   --mode cached-privileged-kubernetes \
   --cache /nix/store \
   --cache /var/lib/docker \
   --instances 3 \
-  --max-runners 1 \
   --auth-type pat \
   --auth-value ghp_xxxxxxxxxxxxx
 
@@ -155,7 +155,6 @@ deskrun add my-runner \
   --cache /nix/store \
   --cache /var/lib/docker \
   --instances 3 \
-  --max-runners 1 \
   --auth-type pat \
   --auth-value ghp_xxxxxxxxxxxxx
 ```
@@ -165,17 +164,15 @@ This creates 3 separate AutoscalingRunnerSets:
 - `my-runner-2`
 - `my-runner-3`
 
-All instances are automatically added to the same runner group (`my-runner`) for unified management.
-
 Each instance:
 - Has dedicated cache partitions (no coordination overhead)
-- Scales independently (0-1 runners per instance)
+- Runs exactly 1 runner (min=1, max=1) for deterministic behavior
 - Provides deterministic cache behavior
-- Shares the same runner group for easy organization
+- Can be targeted independently by workflows
 
 ### Workflow Selection
 
-Use issue number modulo for deterministic distribution:
+Use modulo-based routing for deterministic distribution:
 
 ```yaml
 jobs:
