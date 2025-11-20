@@ -165,10 +165,13 @@ This creates 3 separate AutoscalingRunnerSets:
 - `my-runner-2`
 - `my-runner-3`
 
+All instances are automatically added to the same runner group (`my-runner`) for unified management.
+
 Each instance:
 - Has dedicated cache partitions (no coordination overhead)
 - Scales independently (0-1 runners per instance)
 - Provides deterministic cache behavior
+- Shares the same runner group for easy organization
 
 ### Workflow Selection
 

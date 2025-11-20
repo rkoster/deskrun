@@ -336,14 +336,22 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 		return "", fmt.Errorf("unsupported container mode: %s", installation.ContainerMode)
 	}
 
+	// For multi-instance setups, all instances should be in the same runner group
+	// using the base installation name
+	runnerGroupConfig := ""
+	if installation.Instances > 1 {
+		runnerGroupConfig = fmt.Sprintf(`runnerGroup: "%s"`, installation.Name)
+	}
+
 	values := fmt.Sprintf(`githubConfigUrl: "%s"
 minRunners: %d
 maxRunners: %d
-
+%s
 %s
 
 %s
-`, installation.Repository, installation.MinRunners, installation.MaxRunners, githubConfigSecret, containerModeConfig)
+`, installation.Repository, installation.MinRunners, installation.MaxRunners, 
+		runnerGroupConfig, githubConfigSecret, containerModeConfig)
 
 	return values, nil
 }
