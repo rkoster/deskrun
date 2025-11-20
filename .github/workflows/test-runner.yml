@@ -9,9 +9,13 @@ jobs:
   test:
     runs-on: test-runner
     container:
-      image: docker:dind
-      options: --privileged --init
+      image: nixos/nix:latest
+      options: --privileged
     steps:
+      - name: Install Docker via nix
+        run: |
+          nix-env -i docker
+          
       - name: Check container capabilities
         run: |
           echo "=== Container Diagnostics ==="
@@ -27,32 +31,32 @@ jobs:
           echo ""
           echo "=== Checking for docker ==="
           which docker
-          which dockerd
           docker --version
-          dockerd --version
           echo ""
           echo "=== Checking /sys/fs/cgroup ==="
           ls -la /sys/fs/cgroup/ | head -20
+          
       - name: Start Docker daemon
         run: |
-          # docker:dind image already has docker daemon configured
-          # Wait for it to be ready
+          echo "Starting Docker daemon..."
+          dockerd --storage-driver overlay2 > /tmp/docker.log 2>&1 &
+          
           echo "Waiting for Docker daemon to be ready..."
           timeout=120
           attempt=0
           while ! docker info >/dev/null 2>&1; do
               attempt=$((attempt + 1))
               echo "Attempt $attempt/120: Waiting for Docker daemon..."
-              
               sleep 1
               timeout=$((timeout - 1))
               if [ "$timeout" -le 0 ]; then
                   echo "Error: Docker daemon failed to start within 120 seconds"
                   docker info || true
+                  cat /tmp/docker.log || true
                   exit 1
               fi
           done
-
+          
           echo "Docker daemon is ready!"
           docker info
 
@@ -63,17 +67,11 @@ jobs:
           echo "Hostname: $(hostname)"
           echo "Username: $(whoami)"
           id
-      - name: Test container environment
-        run: |
-          echo "Testing container environment"
-          cat /etc/os-release
-          echo "---"
-          apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
-          curl --version
+          
       - name: Test Docker in container
         run: |
-          export DOCKER_HOST=unix:///tmp/dind/docker.sock
           echo "Testing Docker availability"
           docker info
           docker ps
           echo "Docker is working!"
+
