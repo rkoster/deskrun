@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -185,6 +186,22 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 	_, err = client.Run(chart, vals)
 	if err != nil {
 		return fmt.Errorf("failed to install runner scale set: %w", err)
+	}
+
+	// Ensure the ARS resource is created by applying the manifest via kubectl
+	// The Helm SDK doesn't always immediately apply resources, so we ensure they're created
+	getManifest := exec.CommandContext(ctx, "helm", "get", "manifest", instanceName,
+		"-n", defaultNamespace)
+	manifestData, err := getManifest.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get helm manifest: %w", err)
+	}
+
+	applyCmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-",
+		"--context", m.clusterManager.GetKubeconfig())
+	applyCmd.Stdin = bytes.NewReader(manifestData)
+	if err := applyCmd.Run(); err != nil {
+		return fmt.Errorf("failed to apply ARS manifest: %w", err)
 	}
 
 	// Patch the ARS resource to set minRunners and maxRunners
