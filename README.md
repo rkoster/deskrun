@@ -6,13 +6,11 @@ DeskRun: Unlocking Local Compute for GitHub Actions.
 
 `deskrun` is a CLI tool for running GitHub Actions locally using kind (Kubernetes in Docker) clusters. It provides easy management of local GitHub Actions runners with optimized configurations based on lessons learned from production deployments.
 
-**⚠️ Important Limitation**: Deskrun uses ARC ephemeral runners, which do NOT support label-based job routing (e.g., `runs-on: [self-hosted]`). See [LIMITATIONS.md](LIMITATIONS.md) for details and workarounds.
-
 ## Features
 
 - **Simple CLI Interface**: Easy-to-use commands for managing runner installations
 - **Multiple Container Modes**: Support for standard, privileged, and Docker-in-Docker modes
-- **Persistent Caching**: Host path volume caching for Nix store, Docker daemon, and other paths
+- **Persistent Caching**: Host path volume caching for Docker daemon and other paths
 - **Kind Cluster Management**: Automatic cluster creation and management
 - **Flexible Authentication**: Support for GitHub Personal Access Tokens (PAT) and GitHub Apps
 
@@ -39,7 +37,7 @@ sudo make install
 
 ### Job Routing with Deskrun
 
-Unlike traditional self-hosted runners that use labels (e.g., `runs-on: [self-hosted]`), ARC ephemeral runners use **scale set names** for job routing. This is the officially supported method.
+Unlike traditional self-hosted runners that use labels (e.g., `runs-on: [self-hosted]`), ARC ephemeral runners use **scale set names** for job routing. This is GitHub's officially supported method for ARC.
 
 To route jobs to deskrun runners, use the scale set name in your workflow:
 
@@ -52,7 +50,7 @@ jobs:
       - run: ./build.sh
 ```
 
-See [GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md) for technical details about ARC job routing.
+**Why not labels?** GitHub explicitly states that ARC runners cannot use additional labels for targeting. The scale set name is used as a "single label" for the `runs-on` target. This is simpler and more explicit than traditional label-based routing.
 
 ### Adding a Runner Installation
 
@@ -65,11 +63,11 @@ deskrun add my-runner \
   --auth-type pat \
   --auth-value ghp_xxxxxxxxxxxxx
 
-# Privileged runner with Nix cache
-deskrun add nix-runner \
+# Privileged runner with Docker cache
+deskrun add docker-runner \
   --repository https://github.com/owner/repo \
   --mode cached-privileged-kubernetes \
-  --cache /nix/store \
+  --cache /var/lib/docker \
   --auth-type pat \
   --auth-value ghp_xxxxxxxxxxxxx
 
@@ -78,7 +76,6 @@ deskrun add nix-runner \
 deskrun add multi-runner \
   --repository https://github.com/owner/repo \
   --mode cached-privileged-kubernetes \
-  --cache /nix/store \
   --cache /var/lib/docker \
   --instances 3 \
   --auth-type pat \
@@ -130,7 +127,7 @@ deskrun remove my-runner
 
 ### Privileged Mode (`cached-privileged-kubernetes`)
 
-- **Use case**: Repositories requiring systemd, cgroup access, nested Docker, or Nix builds
+- **Use case**: Repositories requiring systemd, cgroup access, or nested Docker
 - **Configuration**: `--mode cached-privileged-kubernetes`
 - **Capabilities**: SYS_ADMIN, NET_ADMIN, SYS_PTRACE, SYS_CHROOT, and more
 - **Features**:
@@ -143,16 +140,16 @@ deskrun remove my-runner
 
 - **Use case**: Full Docker access via TCP socket
 - **Configuration**: `--mode dind`
-- **Benefits**: Clean Docker environment, good for OpenCode workspaces
+- **Benefits**: Clean Docker environment with isolated daemon
 
 ## Cache Paths
 
-For performance-critical paths like `/nix/store`, `/var/lib/docker`, or `/root/.cache`, you can specify cache paths that will be mounted using hostPath volumes:
+For performance-critical paths like `/var/lib/docker` or `/root/.cache`, you can specify cache paths that will be mounted using hostPath volumes:
 
 ```bash
-deskrun add nix-runner \
+deskrun add docker-runner \
   --repository https://github.com/owner/repo \
-  --cache /nix/store \
+  --cache /var/lib/docker \
   --cache /root/.cache \
   --auth-type pat \
   --auth-value ghp_xxxxxxxxxxxxx
@@ -171,7 +168,6 @@ For better cache isolation and deterministic cache affinity, you can create mult
 deskrun add my-runner \
   --repository https://github.com/owner/repo \
   --mode cached-privileged-kubernetes \
-  --cache /nix/store \
   --cache /var/lib/docker \
   --instances 3 \
   --auth-type pat \
@@ -269,14 +265,60 @@ The tool automatically:
 
 **Note**: The first time you add a runner, `deskrun` will automatically install the GitHub Actions Runner Controller using Helm. This may take a minute or two. Each runner is then deployed as a separate Helm release.
 
-## Lessons Learned
+## Troubleshooting
 
-This tool incorporates lessons learned from extensive refactoring of a GitHub Actions Runner Controller setup:
+### Runners Not Picking Up Jobs
 
-1. **Container Mode Issues**: Avoid incompatible container mode settings that cause runners to cycle
-2. **Privileged Requirements**: Properly configure capabilities and security contexts for nested Docker
-3. **Cache Strategy**: Use host path volumes for performance-critical paths
-4. **Authentication**: Support both PAT and GitHub App authentication methods
+If jobs remain queued:
+
+1. **Verify runner is online**: `deskrun status my-runner`
+2. **Check pod status**: `kubectl get pods -n arc-systems`
+3. **Check logs**: `kubectl logs -n arc-systems -l app=my-runner`
+4. **Verify you're using scale set name in workflow**: `runs-on: my-runner` not `runs-on: [self-hosted]`
+
+### Cluster Issues
+
+```bash
+# Check cluster status
+deskrun cluster status
+
+# Recreate cluster if needed
+deskrun cluster delete
+deskrun cluster create
+```
+
+### Permission Errors
+
+For operations requiring elevated permissions (Docker, systemd), use privileged mode:
+
+```bash
+deskrun add my-runner \
+  --mode cached-privileged-kubernetes \
+  --repository https://github.com/owner/repo \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+```
+
+### Cache Issues
+
+Cache paths are mounted using hostPath volumes. Recommended cache paths:
+- `/var/lib/docker` for Docker layer caching
+- `/root/.cache` for application caches
+- Custom paths like `/tmp/build-cache`
+
+### Clean Up
+
+```bash
+# Remove specific runner
+deskrun remove my-runner
+
+# Clean cache directories
+rm -rf /tmp/github-runner-cache/my-runner
+
+# Reset everything
+deskrun cluster delete
+rm -rf ~/.deskrun
+```
 
 ## Development
 
@@ -306,14 +348,14 @@ make fmt
 
 ## License
 
-[Add your license here]
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 
-## Learn More
+## Known Limitations
 
-- **[LIMITATIONS.md](LIMITATIONS.md)** - Important information about ARC ephemeral runner limitations and workarounds
-- **[GITHUB_JOB_ROUTING_ANALYSIS.md](GITHUB_JOB_ROUTING_ANALYSIS.md)** - Technical deep dive into why label-based job routing doesn't work
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
+1. **Scale Set Name Routing**: Must use scale set names in workflows, not labels like `[self-hosted]`
+2. **Single Cluster**: Manages one kind cluster at a time
+3. **Local Development**: Designed for local development, not production deployments
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or pull request.
+Contributions are welcome! Please open an issue or pull request at https://github.com/rkoster/deskrun.

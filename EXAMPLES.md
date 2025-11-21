@@ -37,27 +37,7 @@ deskrun cluster delete
 
 ## Advanced Configurations
 
-### 3. Nix Build Runner with Cache
-
-For projects using Nix that need to cache the Nix store:
-
-```bash
-deskrun add nix-runner \
-  --repository https://github.com/myorg/nix-project \
-  --mode cached-privileged-kubernetes \
-  --cache /nix/store \
-  --min-runners 1 \
-  --max-runners 3 \
-  --auth-type pat \
-  --auth-value ghp_your_github_pat_here
-```
-
-This configuration:
-- Uses privileged mode for Nix builds
-- Caches `/nix/store` to `/tmp/github-runner-cache/nix-runner/cache-0`
-- Scales between 1-3 runners based on demand
-
-### 4. Docker Build Runner with Multiple Caches
+### 3. Docker Build Runner with Multiple Caches
 
 For projects that build Docker images and need multiple caches:
 
@@ -78,7 +58,7 @@ This configuration:
 - Caches additional build artifacts at `/root/.cache`
 - Scales from 2 to 10 runners
 
-### 5. Docker-in-Docker Runner
+### 4. Docker-in-Docker Runner
 
 For clean Docker environments without host contamination:
 
@@ -95,9 +75,9 @@ deskrun add dind-runner \
 This configuration:
 - Runs Docker in a sidecar container
 - Provides isolated Docker environment
-- Good for OpenCode workspaces
+- Good for container-based workflows
 
-### 6. Multiple Runners for Different Repos
+### 5. Multiple Runners for Different Repos
 
 You can run multiple runner installations simultaneously:
 
@@ -117,11 +97,10 @@ deskrun add backend-runner \
   --auth-type pat \
   --auth-value ghp_your_github_pat_here
 
-# Nix-based infrastructure
+# Infrastructure repository
 deskrun add infra-runner \
   --repository https://github.com/myorg/infrastructure \
-  --mode cached-privileged-kubernetes \
-  --cache /nix/store \
+  --mode kubernetes \
   --auth-type pat \
   --auth-value ghp_your_github_pat_here
 
@@ -178,7 +157,6 @@ deskrun remove my-runner
 deskrun add my-runner \
   --repository https://github.com/myorg/myrepo \
   --mode cached-privileged-kubernetes \
-  --cache /nix/store \
   --cache /var/lib/docker \
   --max-runners 10 \
   --auth-type pat \
@@ -275,7 +253,6 @@ deskrun status
 
 Common cache paths to consider:
 
-- `/nix/store` - Nix package cache (can be very large)
 - `/var/lib/docker` - Docker daemon data (images, containers)
 - `/root/.cache` - General application caches
 - `/home/runner/.cache` - User-level caches
@@ -295,12 +272,11 @@ Choose the right mode for your needs:
 - **cached-privileged-kubernetes**: Use when you need:
   - Nested Docker/containers
   - systemd access
-  - Nix builds
   - cgroup manipulation
 - **dind**: Use when you need:
   - Clean Docker environment
   - Isolated Docker daemon
-  - OpenCode workspaces
+  - Container-based workflows
 
 ### 4. Authentication
 
@@ -325,4 +301,4 @@ kubectl top pods -n arc-systems
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
+For common issues and solutions, see the Troubleshooting section in the main [README.md](README.md).
