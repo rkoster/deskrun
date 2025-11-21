@@ -64,14 +64,14 @@ check: lint test
 dev: build
 	./$(BINARY_NAME)
 
-# Update runner with Nix and Docker caching for this repository
+# Update runner with Docker and user-level Nix caching for this repository
 runner-update:
 	@echo "Updating runner '$(RUNNER_NAME)' for repository '$(GITHUB_REPO)'..."
 	@echo "Configuration:"
 	@echo "  Runner name: $(RUNNER_NAME)"
 	@echo "  Repository: https://github.com/$(GITHUB_REPO)"
 	@echo "  Mode: cached-privileged-kubernetes"
-	@echo "  Cache paths: /nix/store, /var/lib/docker"
+	@echo "  Cache paths: /var/lib/docker, /root/.cache/nix"
 	@echo ""
 	@GITHUB_TOKEN=$$(gh auth token) && \
 	echo "Step 1: Bringing down existing runner..." && \
@@ -84,8 +84,8 @@ runner-update:
 	go run ./cmd/deskrun add $(RUNNER_NAME) \
 		--repository https://github.com/$(GITHUB_REPO) \
 		--mode cached-privileged-kubernetes \
-		--cache /nix/store \
 		--cache /var/lib/docker \
+		--cache /root/.cache/nix \
 		--auth-type pat \
 		--auth-value $$GITHUB_TOKEN && \
 	echo "" && \
