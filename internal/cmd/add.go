@@ -124,8 +124,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Validate parameters
-	if err := validateAddParams(addInstances, addMaxRunners, containerMode); err != nil {
+	// Validate parameters including cache paths
+	if err := validateAddParams(addInstances, addMaxRunners, containerMode, cachePaths); err != nil {
 		return err
 	}
 
@@ -168,11 +168,25 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateAddParams validates the instances and max-runners parameters
-func validateAddParams(instances, maxRunners int, containerMode types.ContainerMode) error {
+// validateAddParams validates the instances, max-runners, and cache paths
+func validateAddParams(instances, maxRunners int, containerMode types.ContainerMode, cachePaths []types.CachePath) error {
 	// Validate instances
 	if instances < 1 {
 		return fmt.Errorf("instances must be at least 1")
+	}
+
+	// Validate cache paths - provide helpful guidance for /nix/store
+	for _, cachePath := range cachePaths {
+		if cachePath.MountPath == "/nix/store" {
+			return fmt.Errorf(
+				"caching /nix/store is not supported in deskrun: " +
+					"mounting host paths directly to /nix/store breaks NixOS containers by overwriting essential NixOS binaries and libraries.\n\n" +
+					"To cache Nix packages, consider:\n" +
+					"1. Use the opencode-workspace-action with overlayfs support for /nix/store caching\n" +
+					"2. Cache alternative paths like /root/.cache/nix for user-level Nix cache\n" +
+					"3. Cache /var/lib/docker for Docker layer caching (unaffected by this limitation)\n\n" +
+					"See: https://github.com/rkoster/opencode-workspace-action/issues (overlay filesystem support for /nix/store)")
+		}
 	}
 
 	return nil
