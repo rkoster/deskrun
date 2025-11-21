@@ -567,15 +567,12 @@ data:
 
 	// Add cache path volume mounts to job container
 	// Note: These volumes are defined in the hook extension, not the runner template
-	// TEMPORARILY DISABLED FOR DEBUGGING - testing if cache volumes cause pod init failure
-	/*
-		if len(installation.CachePaths) > 0 {
-			for i := range installation.CachePaths {
-				hookExtension += fmt.Sprintf("\n        - name: cache-%d\n          mountPath: %s",
-					i, installation.CachePaths[i].MountPath)
-			}
+	if len(installation.CachePaths) > 0 {
+		for i := range installation.CachePaths {
+			hookExtension += fmt.Sprintf("\n        - name: cache-%d\n          mountPath: %s",
+				i, installation.CachePaths[i].MountPath)
 		}
-	*/
+	}
 
 	// Add volume definitions (system mounts + cache volumes needed by job container)
 	// Cache volumes are only needed for job containers, not the runner container
@@ -607,24 +604,21 @@ data:
           type: Directory`
 
 	// Add cache path volumes to hook extension
-	// TEMPORARILY DISABLED FOR DEBUGGING - testing if cache volumes cause pod init failure
-	/*
-		if len(installation.CachePaths) > 0 {
-			for i, path := range installation.CachePaths {
-				hostPath := path.HostPath
-				if hostPath == "" {
-					// Generate instance-specific cache path for multi-instance setups
-					if instanceNum > 0 {
-						hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
-					} else {
-						hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
-					}
+	if len(installation.CachePaths) > 0 {
+		for i, path := range installation.CachePaths {
+			hostPath := path.HostPath
+			if hostPath == "" {
+				// Generate instance-specific cache path for multi-instance setups
+				if instanceNum > 0 {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
+				} else {
+					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
 				}
-				hookExtension += fmt.Sprintf("\n      - name: cache-%d\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
-					i, hostPath)
 			}
+			hookExtension += fmt.Sprintf("\n      - name: cache-%d\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
+				i, hostPath)
 		}
-	*/
+	}
 
 	return hookExtension
 }
