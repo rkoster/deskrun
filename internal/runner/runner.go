@@ -153,6 +153,7 @@ func (m *Manager) applyManifestFromHelm(ctx context.Context, manifestData string
 
 	// Split the manifest by "---" to handle multiple resources
 	resources := strings.Split(manifestData, "---")
+	appliedCount := 0
 	for _, resource := range resources {
 		resource = strings.TrimSpace(resource)
 		if resource == "" {
@@ -162,12 +163,13 @@ func (m *Manager) applyManifestFromHelm(ctx context.Context, manifestData string
 		// Parse the resource
 		var obj unstructured.Unstructured
 		if err := yaml.Unmarshal([]byte(resource), &obj); err != nil {
-			continue // Skip invalid resources
+			return fmt.Errorf("failed to unmarshal resource: %w\nResource:\n%s", err, resource)
 		}
 
 		if obj.GetKind() == "" {
 			continue // Skip empty resources
 		}
+		appliedCount++
 
 		// Get the GVR for the resource
 		gvr := schema.GroupVersionResource{
@@ -185,6 +187,10 @@ func (m *Manager) applyManifestFromHelm(ctx context.Context, manifestData string
 				return fmt.Errorf("failed to apply resource %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 			}
 		}
+	}
+
+	if appliedCount == 0 {
+		return fmt.Errorf("no resources were applied from manifest")
 	}
 
 	return nil
@@ -424,25 +430,23 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 		if err := yaml.Unmarshal(valuesContent, &vals); err != nil {
 			return fmt.Errorf("failed to parse values: %w", err)
 		}
+	} else {
+		return fmt.Errorf("failed to read values file: %w", err)
 	}
 
-	release, err := client.Run(chart, vals)
+	// Debug: Verify githubConfigSecret is present
+	if _, ok := vals["githubConfigSecret"]; !ok {
+		return fmt.Errorf("githubConfigSecret missing from values")
+	}
+
+	_, err = client.Run(chart, vals)
 	if err != nil {
 		return fmt.Errorf("failed to install runner scale set: %w", err)
 	}
 
-	// Apply the Helm manifest using Kubernetes client
-	// The Helm SDK may not always immediately apply resources, so we ensure they're created
-	if release.Manifest != "" {
-		if err := m.applyManifestFromHelm(ctx, release.Manifest); err != nil {
-			return fmt.Errorf("failed to apply ARS manifest: %w", err)
-		}
-	}
-
-	// Patch the ARS resource to set minRunners and maxRunners
-	// The Helm chart doesn't expose these values, so we need to patch after install
-	if err := m.patchAutoscalingRunnerSet(ctx, defaultNamespace, instanceName, installation.MinRunners, installation.MaxRunners); err != nil {
-		return fmt.Errorf("failed to patch ARS minRunners/maxRunners: %w", err)
+	// Wait for the AutoscalingRunnerSet CRD to be available
+	if err := m.waitForCRD(ctx, "autoscalingrunnersets.actions.github.com"); err != nil {
+		return fmt.Errorf("failed to wait for ARS CRD: %w", err)
 	}
 
 	fmt.Printf("  Instance '%s' installed successfully\n", instanceName)
@@ -740,6 +744,8 @@ metadata:
 data:
   content: |
     spec:
+      hostPID: true
+      hostIPC: true
       securityContext:
         runAsUser: 0
         runAsGroup: 0
