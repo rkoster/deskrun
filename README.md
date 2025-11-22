@@ -18,14 +18,38 @@ DeskRun: Unlocking Local Compute for GitHub Actions.
 
 ### Prerequisites
 
-- Go 1.20 or later
 - Docker
 
+### Using Nix Flakes (Recommended)
+
+The official way to install deskrun is via Nix flakes:
+
+```bash
+# Run directly without installing
+nix run github:rkoster/deskrun -- --help
+
+# Install to your profile
+nix profile install github:rkoster/deskrun
+
+# Or add to your NixOS/home-manager configuration
+{
+  inputs.deskrun.url = "github:rkoster/deskrun";
+  # ...
+}
+```
+
 ### Build from Source
+
+If you prefer to build from source:
 
 ```bash
 git clone https://github.com/rkoster/deskrun.git
 cd deskrun
+
+# With Nix (recommended)
+nix build
+
+# Or with Go (requires Go 1.24 or later)
 make build
 sudo make install
 ```
