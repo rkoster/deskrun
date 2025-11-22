@@ -1,6 +1,6 @@
 module github.com/rkoster/deskrun
 
-go 1.24.10
+go 1.24.0
 
 require (
 	github.com/onsi/ginkgo/v2 v2.27.2
