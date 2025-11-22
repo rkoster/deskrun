@@ -73,8 +73,6 @@ jobs:
 
           echo "Docker daemon started successfully"
 
-      - uses: actions/checkout@v4
-
       - name: Run basic test
         run: |
           echo "Running on ARC scale set runner in container"
