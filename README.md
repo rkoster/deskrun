@@ -20,9 +20,6 @@ DeskRun: Unlocking Local Compute for GitHub Actions.
 
 - Go 1.20 or later
 - Docker
-- kubectl
-- kind
-- helm (v3.x)
 
 ### Build from Source
 

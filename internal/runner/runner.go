@@ -1,23 +1,32 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/rkoster/deskrun/internal/cluster"
-	"github.com/rkoster/deskrun/pkg/templates"
-	"github.com/rkoster/deskrun/pkg/types"
+	deskruntypes "github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/registry"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -40,6 +49,242 @@ func NewManager(clusterManager *cluster.Manager) *Manager {
 	return &Manager{
 		clusterManager: clusterManager,
 	}
+}
+
+// getKubernetesClient creates a Kubernetes clientset
+func (m *Manager) getKubernetesClient() (*kubernetes.Clientset, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{
+		CurrentContext: m.clusterManager.GetKubeconfig(),
+	}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+	config, err := kubeConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+
+	return clientset, nil
+}
+
+// getDynamicClient creates a dynamic Kubernetes client
+func (m *Manager) getDynamicClient() (dynamic.Interface, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{
+		CurrentContext: m.clusterManager.GetKubeconfig(),
+	}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+	config, err := kubeConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	return dynamicClient, nil
+}
+
+// applyConfigMapFromYAML applies a ConfigMap from YAML string
+func (m *Manager) applyConfigMapFromYAML(ctx context.Context, yamlContent string) error {
+	clientset, err := m.getKubernetesClient()
+	if err != nil {
+		return err
+	}
+
+	// Use Kubernetes deserializer to properly parse the YAML
+	decode := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer().Decode
+	obj, _, err := decode([]byte(yamlContent), nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to decode ConfigMap YAML: %w", err)
+	}
+
+	// Type assert to ConfigMap
+	configMap, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return fmt.Errorf("decoded object is not a ConfigMap, got %T", obj)
+	}
+
+	// Ensure namespace is set (fallback to default if not parsed correctly)
+	if configMap.Namespace == "" {
+		configMap.Namespace = defaultNamespace
+	}
+
+	// Ensure name is set
+	if configMap.Name == "" {
+		return fmt.Errorf("ConfigMap name is empty after parsing YAML")
+	}
+
+	// Try to create or update the ConfigMap
+	_, err = clientset.CoreV1().ConfigMaps(configMap.Namespace).Get(ctx, configMap.Name, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			// Create the ConfigMap
+			_, err = clientset.CoreV1().ConfigMaps(configMap.Namespace).Create(ctx, configMap, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to create ConfigMap: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to get ConfigMap: %w", err)
+		}
+	} else {
+		// Update the ConfigMap
+		_, err = clientset.CoreV1().ConfigMaps(configMap.Namespace).Update(ctx, configMap, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update ConfigMap: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// applyManifestFromHelm applies a Helm-generated manifest
+func (m *Manager) applyManifestFromHelm(ctx context.Context, manifestData string) error {
+	dynamicClient, err := m.getDynamicClient()
+	if err != nil {
+		return err
+	}
+
+	// Split the manifest by "---" to handle multiple resources
+	resources := strings.Split(manifestData, "---")
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+
+		// Parse the resource
+		var obj unstructured.Unstructured
+		if err := yaml.Unmarshal([]byte(resource), &obj); err != nil {
+			continue // Skip invalid resources
+		}
+
+		if obj.GetKind() == "" {
+			continue // Skip empty resources
+		}
+
+		// Get the GVR for the resource
+		gvr := schema.GroupVersionResource{
+			Group:    obj.GroupVersionKind().Group,
+			Version:  obj.GroupVersionKind().Version,
+			Resource: strings.ToLower(obj.GetKind()) + "s",
+		}
+
+		// Apply the resource
+		_, err = dynamicClient.Resource(gvr).Namespace(obj.GetNamespace()).Create(ctx, &obj, metav1.CreateOptions{})
+		if err != nil && !k8serrors.IsAlreadyExists(err) {
+			// Try to update if creation failed
+			_, err = dynamicClient.Resource(gvr).Namespace(obj.GetNamespace()).Update(ctx, &obj, metav1.UpdateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to apply resource %s/%s: %w", obj.GetKind(), obj.GetName(), err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// patchAutoscalingRunnerSet patches an AutoscalingRunnerSet resource
+func (m *Manager) patchAutoscalingRunnerSet(ctx context.Context, namespace, name string, minRunners, maxRunners int) error {
+	dynamicClient, err := m.getDynamicClient()
+	if err != nil {
+		return err
+	}
+
+	// Define the GVR for AutoscalingRunnerSet
+	gvr := schema.GroupVersionResource{
+		Group:    "actions.github.com",
+		Version:  "v1alpha1",
+		Resource: "autoscalingrunnersets",
+	}
+
+	// Create the patch
+	patchData := []byte(fmt.Sprintf(`{"spec":{"minRunners":%d,"maxRunners":%d}}`, minRunners, maxRunners))
+
+	// Apply the patch
+	_, err = dynamicClient.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to patch AutoscalingRunnerSet: %w", err)
+	}
+
+	return nil
+}
+
+// getAutoscalingRunnerSetStatus gets the status of an AutoscalingRunnerSet
+func (m *Manager) getAutoscalingRunnerSetStatus(ctx context.Context, namespace, name string) (string, error) {
+	dynamicClient, err := m.getDynamicClient()
+	if err != nil {
+		return "", err
+	}
+
+	// Define the GVR for AutoscalingRunnerSet
+	gvr := schema.GroupVersionResource{
+		Group:    "actions.github.com",
+		Version:  "v1alpha1",
+		Resource: "autoscalingrunnersets",
+	}
+
+	// Get the resource
+	obj, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get AutoscalingRunnerSet: %w", err)
+	}
+
+	// Format the output
+	status := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\n", obj.GetName(), obj.GetNamespace())
+	if spec, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
+		if minRunners, found, _ := unstructured.NestedInt64(spec, "minRunners"); found {
+			status += fmt.Sprintf("MIN_RUNNERS: %d\n", minRunners)
+		}
+		if maxRunners, found, _ := unstructured.NestedInt64(spec, "maxRunners"); found {
+			status += fmt.Sprintf("MAX_RUNNERS: %d\n", maxRunners)
+		}
+	}
+
+	return status, nil
+}
+
+// crdExists checks if a CRD exists
+func (m *Manager) crdExists(ctx context.Context, crdName string) (bool, error) {
+	dynamicClient, err := m.getDynamicClient()
+	if err != nil {
+		return false, err
+	}
+
+	// Define the GVR for CRDs
+	gvr := schema.GroupVersionResource{
+		Group:    "apiextensions.k8s.io",
+		Version:  "v1",
+		Resource: "customresourcedefinitions",
+	}
+
+	// Try to get the CRD
+	_, err = dynamicClient.Resource(gvr).Get(ctx, crdName, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+// waitForCRD waits for a CRD to be established
+func (m *Manager) waitForCRD(ctx context.Context, crdName string) error {
+	return wait.PollUntilContextTimeout(ctx, 1*time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		exists, err := m.crdExists(ctx, crdName)
+		if err != nil {
+			return false, err
+		}
+		return exists, nil
+	})
 }
 
 // getHelmConfig creates a Helm action configuration
@@ -65,7 +310,7 @@ func (m *Manager) getHelmConfig(namespace string) (*action.Configuration, error)
 }
 
 // Install installs a runner scale set
-func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstallation) error {
+func (m *Manager) Install(ctx context.Context, installation *deskruntypes.RunnerInstallation) error {
 	// Ensure cluster exists
 	exists, err := m.clusterManager.Exists(ctx)
 	if err != nil {
@@ -110,7 +355,7 @@ func (m *Manager) Install(ctx context.Context, installation *types.RunnerInstall
 }
 
 // installInstance installs a single runner scale set instance
-func (m *Manager) installInstance(ctx context.Context, installation *types.RunnerInstallation, instanceName string, instanceNum int) error {
+func (m *Manager) installInstance(ctx context.Context, installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) error {
 	// Create temporary directory for Helm values
 	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-*")
 	if err != nil {
@@ -121,7 +366,7 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 	fmt.Printf("  Installing runner scale set '%s'...\n", instanceName)
 
 	// For privileged container mode, generate and apply the hook extension ConfigMap
-	if installation.ContainerMode == types.ContainerModePrivileged {
+	if installation.ContainerMode == deskruntypes.ContainerModePrivileged {
 		fmt.Printf("  Applying hook extension ConfigMap for privileged mode...\n")
 		hookExtension := m.generateHookExtensionConfigMap(installation, instanceName, instanceNum)
 		hookExtensionPath := filepath.Join(tmpDir, "hook-extension.yaml")
@@ -129,10 +374,8 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 			return fmt.Errorf("failed to write hook extension: %w", err)
 		}
 
-		// Apply the ConfigMap using kubectl
-		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", hookExtensionPath,
-			"--context", m.clusterManager.GetKubeconfig())
-		if err := cmd.Run(); err != nil {
+		// Apply the ConfigMap using Kubernetes client
+		if err := m.applyConfigMapFromYAML(ctx, hookExtension); err != nil {
 			return fmt.Errorf("failed to apply hook extension ConfigMap: %w", err)
 		}
 	}
@@ -183,35 +426,22 @@ func (m *Manager) installInstance(ctx context.Context, installation *types.Runne
 		}
 	}
 
-	_, err = client.Run(chart, vals)
+	release, err := client.Run(chart, vals)
 	if err != nil {
 		return fmt.Errorf("failed to install runner scale set: %w", err)
 	}
 
-	// Ensure the ARS resource is created by applying the manifest via kubectl
-	// The Helm SDK doesn't always immediately apply resources, so we ensure they're created
-	getManifest := exec.CommandContext(ctx, "helm", "get", "manifest", instanceName,
-		"-n", defaultNamespace)
-	manifestData, err := getManifest.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get helm manifest: %w", err)
-	}
-
-	applyCmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-",
-		"--context", m.clusterManager.GetKubeconfig())
-	applyCmd.Stdin = bytes.NewReader(manifestData)
-	if err := applyCmd.Run(); err != nil {
-		return fmt.Errorf("failed to apply ARS manifest: %w", err)
+	// Apply the Helm manifest using Kubernetes client
+	// The Helm SDK may not always immediately apply resources, so we ensure they're created
+	if release.Manifest != "" {
+		if err := m.applyManifestFromHelm(ctx, release.Manifest); err != nil {
+			return fmt.Errorf("failed to apply ARS manifest: %w", err)
+		}
 	}
 
 	// Patch the ARS resource to set minRunners and maxRunners
 	// The Helm chart doesn't expose these values, so we need to patch after install
-	patchJSON := fmt.Sprintf(`{"spec":{"minRunners":%d,"maxRunners":%d}}`,
-		installation.MinRunners, installation.MaxRunners)
-	patchCmd := exec.CommandContext(ctx, "kubectl", "patch", "autoscalingrunnersets",
-		"-n", defaultNamespace, instanceName, "--type", "merge", "-p", patchJSON,
-		"--context", m.clusterManager.GetKubeconfig())
-	if err := patchCmd.Run(); err != nil {
+	if err := m.patchAutoscalingRunnerSet(ctx, defaultNamespace, instanceName, installation.MinRunners, installation.MaxRunners); err != nil {
 		return fmt.Errorf("failed to patch ARS minRunners/maxRunners: %w", err)
 	}
 
@@ -282,57 +512,42 @@ func (m *Manager) Status(ctx context.Context, name string) (string, error) {
 		release.Name, release.Namespace, release.Info.Status, release.Version)
 
 	// Also get the AutoscalingRunnerSet status
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "autoscalingrunnersets", name,
-		"-n", defaultNamespace, "--context", m.clusterManager.GetKubeconfig(),
-		"-o", "wide")
-
-	k8sOutput, err := cmd.Output()
+	arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, name)
 	if err != nil {
-		// Just show Helm status if kubectl fails
+		// Just show Helm status if getting ARS status fails
 		return statusStr, nil
 	}
 
-	return fmt.Sprintf("%s\nKubernetes Resources:\n%s", statusStr, string(k8sOutput)), nil
+	return fmt.Sprintf("%s\nKubernetes Resources:\n%s", statusStr, arsStatus), nil
 }
 
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
-	manifest := templates.GenerateNamespaceManifest(namespace)
-
-	tmpFile, err := os.CreateTemp("/tmp", "namespace-*.yaml")
+	clientset, err := m.getKubernetesClient()
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
 
-	if err := os.WriteFile(tmpFile.Name(), []byte(manifest), 0644); err != nil {
-		return err
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+		},
 	}
 
-	// Apply with --dry-run=client first to validate, then apply
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", tmpFile.Name(),
-		"--context", m.clusterManager.GetKubeconfig())
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Ignore error if namespace already exists
-		if !contains(string(output), "AlreadyExists") && !contains(string(output), "already exists") {
-			return fmt.Errorf("failed to create namespace: %w\nOutput: %s", err, string(output))
-		}
+	_, err = clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create namespace: %w", err)
 	}
 
 	return nil
 }
 
 func (m *Manager) applyManifest(ctx context.Context, manifestPath string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", manifestPath,
-		"--context", m.clusterManager.GetKubeconfig())
-
-	output, err := cmd.CombinedOutput()
+	content, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return fmt.Errorf("kubectl apply failed: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	return nil
+	return m.applyManifestFromHelm(ctx, string(content))
 }
 
 func contains(s, substr string) bool {
@@ -352,7 +567,7 @@ func containsMiddle(s, substr string) bool {
 }
 
 // generateHelmValues generates Helm values for the runner scale set
-func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, instanceName string, instanceNum int) (string, error) {
+func (m *Manager) generateHelmValues(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) (string, error) {
 	// Build the values map
 	values := map[string]interface{}{
 		"githubConfigUrl":    installation.Repository,
@@ -366,7 +581,7 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 	}
 
 	// Determine authentication method
-	if installation.AuthType == types.AuthTypePAT {
+	if installation.AuthType == deskruntypes.AuthTypePAT {
 		values["githubConfigSecret"] = map[string]interface{}{
 			"github_token": installation.AuthValue,
 		}
@@ -381,7 +596,7 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 	// Build container mode configuration
 	var containerModeConfig map[string]interface{}
 	switch installation.ContainerMode {
-	case types.ContainerModeKubernetes:
+	case deskruntypes.ContainerModeKubernetes:
 		// Standard kubernetes mode with simple template (no hook extension)
 		containerModeConfig = map[string]interface{}{
 			"type": "kubernetes",
@@ -414,7 +629,7 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 				},
 			},
 		}
-	case types.ContainerModePrivileged:
+	case deskruntypes.ContainerModePrivileged:
 		// For privileged mode, we need to parse the generated YAML string into a map
 		containerModeYAML := m.generatePrivilegedContainerMode(installation, instanceNum)
 		// The function returns the full "containerMode: ..." structure, so parse it into a temp object
@@ -441,7 +656,7 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 			}
 			values["template"] = template
 		}
-	case types.ContainerModeDinD:
+	case deskruntypes.ContainerModeDinD:
 		containerModeConfig = map[string]interface{}{
 			"type": "dind",
 		}
@@ -462,7 +677,7 @@ func (m *Manager) generateHelmValues(installation *types.RunnerInstallation, ins
 // generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
 // using ARC's hook extension pattern to inject privileged context into job containers only.
 // Uses kubernetes-novolume mode to avoid PVC complications - ephemeral storage is handled by the hook extension.
-func (m *Manager) generatePrivilegedContainerMode(installation *types.RunnerInstallation, instanceNum int) string {
+func (m *Manager) generatePrivilegedContainerMode(installation *deskruntypes.RunnerInstallation, instanceNum int) string {
 	config := `containerMode:
   type: "kubernetes-novolume"
 template:
@@ -512,7 +727,7 @@ template:
 // IMPORTANT: The hook extension should ONLY patch the job container with security context and privileged mounts.
 // It should NOT redefine volumes that are already in the runner template (like "work").
 // The hook extension is a JSON patch that gets merged with the existing pod spec.
-func (m *Manager) generateHookExtensionConfigMap(installation *types.RunnerInstallation, instanceName string, instanceNum int) string {
+func (m *Manager) generateHookExtensionConfigMap(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) string {
 	// Build the PodSpec patch that will be applied to job pods
 	// This patch adds privileged context and capabilities only to job containers
 	// The "$job" placeholder targets the job container created by the runner
@@ -633,9 +848,11 @@ func sanitizeVolumeName(path string) string {
 }
 func (m *Manager) ensureARCController(ctx context.Context) error {
 	// Check if CRDs are already installed
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "crd", "autoscalingrunnersets.actions.github.com",
-		"--context", m.clusterManager.GetKubeconfig())
-	if err := cmd.Run(); err == nil {
+	exists, err := m.crdExists(ctx, "autoscalingrunnersets.actions.github.com")
+	if err != nil {
+		return fmt.Errorf("failed to check CRD: %w", err)
+	}
+	if exists {
 		// CRDs already exist, controller is likely installed
 		return nil
 	}
@@ -681,24 +898,12 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 
 	fmt.Println("ARC controller installed successfully")
 
-	// Wait a moment for CRDs to be ready
+	// Wait for CRDs to be ready
 	fmt.Println("Waiting for CRDs to be ready...")
-	for i := 0; i < 30; i++ {
-		cmd = exec.CommandContext(ctx, "kubectl", "wait", "--for", "condition=established",
-			"--timeout=10s", "crd/autoscalingrunnersets.actions.github.com",
-			"--context", m.clusterManager.GetKubeconfig())
-		if err := cmd.Run(); err == nil {
-			fmt.Println("CRDs are ready")
-			return nil
-		}
-		// Wait a bit and retry
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(1 * time.Second):
-			// Continue to next iteration
-		}
+	if err := m.waitForCRD(ctx, "autoscalingrunnersets.actions.github.com"); err != nil {
+		return fmt.Errorf("timeout waiting for CRDs to be ready: %w", err)
 	}
 
-	return fmt.Errorf("timeout waiting for CRDs to be ready")
+	fmt.Println("CRDs are ready")
+	return nil
 }

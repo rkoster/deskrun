@@ -3,38 +3,40 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"os/exec"
 
 	"github.com/rkoster/deskrun/pkg/types"
+	"sigs.k8s.io/kind/pkg/cluster"
 )
 
 // Manager handles kind cluster operations
 type Manager struct {
-	config *types.ClusterConfig
+	config   *types.ClusterConfig
+	provider *cluster.Provider
 }
 
 // NewManager creates a new cluster manager
 func NewManager(config *types.ClusterConfig) *Manager {
 	return &Manager{
-		config: config,
+		config:   config,
+		provider: cluster.NewProvider(),
 	}
 }
 
 // Exists checks if the cluster exists
 func (m *Manager) Exists(ctx context.Context) (bool, error) {
-	cmd := exec.CommandContext(ctx, "kind", "get", "clusters")
-	output, err := cmd.Output()
+	clusters, err := m.provider.List()
 	if err != nil {
-		// If kind returns error, no clusters exist
-		return false, nil
+		return false, fmt.Errorf("failed to list clusters: %w", err)
 	}
 
 	// Check if our cluster is in the list
-	clusterName := m.config.Name
-	clusters := string(output)
+	for _, name := range clusters {
+		if name == m.config.Name {
+			return true, nil
+		}
+	}
 
-	// Simple check if cluster name appears in output
-	return contains(clusters, clusterName), nil
+	return false, nil
 }
 
 // Create creates a new kind cluster
@@ -48,13 +50,12 @@ func (m *Manager) Create(ctx context.Context) error {
 		return fmt.Errorf("cluster %s already exists", m.config.Name)
 	}
 
-	// Create cluster with config
-	args := []string{"create", "cluster", "--name", m.config.Name}
-
-	cmd := exec.CommandContext(ctx, "kind", args...)
-	output, err := cmd.CombinedOutput()
+	// Create cluster using kind Go package
+	err = m.provider.Create(m.config.Name,
+		cluster.CreateWithWaitForReady(0), // Use default wait time
+	)
 	if err != nil {
-		return fmt.Errorf("failed to create cluster: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to create cluster: %w", err)
 	}
 
 	return nil
@@ -71,10 +72,10 @@ func (m *Manager) Delete(ctx context.Context) error {
 		return fmt.Errorf("cluster %s does not exist", m.config.Name)
 	}
 
-	cmd := exec.CommandContext(ctx, "kind", "delete", "cluster", "--name", m.config.Name)
-	output, err := cmd.CombinedOutput()
+	// Delete cluster using kind Go package
+	err = m.provider.Delete(m.config.Name, "")
 	if err != nil {
-		return fmt.Errorf("failed to delete cluster: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to delete cluster: %w", err)
 	}
 
 	return nil
@@ -83,20 +84,4 @@ func (m *Manager) Delete(ctx context.Context) error {
 // GetKubeconfig returns the kubeconfig context name for the cluster
 func (m *Manager) GetKubeconfig() string {
 	return fmt.Sprintf("kind-%s", m.config.Name)
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr ||
-			s[len(s)-len(substr):] == substr ||
-			containsMiddle(s, substr)))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

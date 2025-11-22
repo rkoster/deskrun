@@ -58,7 +58,7 @@ func TestGenerateHelmValues_RepositoryLevel(t *testing.T) {
 				AuthValue:     "test-token",
 			},
 			instanceNum:  3,
-			wantContains: `runnerScaleSetName: "my-runner-3"`,
+			wantContains: `runnerScaleSetName: my-runner-3`,
 		},
 	}
 
