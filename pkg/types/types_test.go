@@ -70,7 +70,7 @@ func TestRunnerInstallation(t *testing.T) {
 		MaxRunners:    5,
 		Instances:     1,
 		CachePaths: []CachePath{
-			{MountPath: "/nix/store", HostPath: "/tmp/nix"},
+			{Target: "/nix/store", Source: "/tmp/nix"},
 		},
 		AuthType:  AuthTypePAT,
 		AuthValue: "ghp_test",
@@ -99,8 +99,8 @@ func TestRunnerInstallationMultipleInstances(t *testing.T) {
 		MaxRunners:    1,
 		Instances:     3,
 		CachePaths: []CachePath{
-			{MountPath: "/nix/store", HostPath: ""},
-			{MountPath: "/var/lib/docker", HostPath: ""},
+			{Target: "/nix/store", Source: ""},
+			{Target: "/var/lib/docker", Source: ""},
 		},
 		AuthType:  AuthTypePAT,
 		AuthValue: "ghp_test",

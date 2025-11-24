@@ -176,10 +176,28 @@ deskrun add docker-runner \
   --auth-value ghp_xxxxxxxxxxxxx
 ```
 
-Cache paths are automatically partitioned per installation at:
+You can also specify custom source and target paths using the `src:target` notation:
+
+```bash
+deskrun add custom-cache-runner \
+  --repository https://github.com/owner/repo \
+  --cache /host/cache/npm:/root/.npm \
+  --cache /host/cache/docker:/var/lib/docker \
+  --cache /root/.cache \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+```
+
+Cache path formats:
+- **Target only**: `--cache /target/path` - Auto-generates host path
+- **Source and target**: `--cache /host/path:/container/path` - Use custom host path
+
+Cache paths are automatically partitioned per installation when auto-generated:
 ```
 /tmp/github-runner-cache/{installation-name}/cache-{index}
 ```
+
+When using custom host paths with `src:target` notation, the specified host path is used directly.
 
 ## Multiple Instances
 
@@ -326,6 +344,17 @@ Cache paths are mounted using hostPath volumes. Recommended cache paths:
 - `/var/lib/docker` for Docker layer caching
 - `/root/.cache` for application caches
 - Custom paths like `/tmp/build-cache`
+
+You can use custom host paths for better control:
+```bash
+# Use custom host paths
+deskrun add my-runner \
+  --cache /host/persistent/docker:/var/lib/docker \
+  --cache /host/persistent/npm:/root/.npm \
+  --repository https://github.com/owner/repo \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+```
 
 ### Clean Up
 

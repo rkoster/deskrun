@@ -2,12 +2,177 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/rkoster/deskrun/pkg/types"
 )
+
+var _ = Describe("Cache Path Parsing", func() {
+	// Tests for the new src:target notation functionality
+	Context("when parsing cache path flags", func() {
+		DescribeTable("cache path parsing scenarios",
+			func(input string, expectedTarget, expectedSource string, shouldSucceed bool) {
+				var source, target string
+				var err error
+
+				// Parse src:target notation (same logic as in runAdd)
+				if strings.Contains(input, ":") {
+					parts := strings.SplitN(input, ":", 2)
+					if len(parts) == 2 {
+						source = parts[0]
+						target = parts[1]
+					} else {
+						err = fmt.Errorf("invalid cache path format '%s', expected src:target or just target", input)
+					}
+				} else {
+					// Single path provided - use as target path, auto-generate source path
+					target = input
+					source = "" // Will be auto-generated
+				}
+
+				if shouldSucceed {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(target).To(Equal(expectedTarget))
+					Expect(source).To(Equal(expectedSource))
+				} else {
+					Expect(err).To(HaveOccurred())
+				}
+			},
+			// Target only cases
+			Entry("simple target path", "/var/lib/docker", "/var/lib/docker", "", true),
+			Entry("target path with spaces", "/path with spaces", "/path with spaces", "", true),
+			Entry("complex target path", "/usr/local/cargo/registry", "/usr/local/cargo/registry", "", true),
+
+			// src:target cases
+			Entry("simple src:target", "/host/docker:/var/lib/docker", "/var/lib/docker", "/host/docker", true),
+			Entry("src:target with spaces in host", "/host path/docker:/var/lib/docker", "/var/lib/docker", "/host path/docker", true),
+			Entry("src:target with spaces in target", "/host/docker:/var lib/docker", "/var lib/docker", "/host/docker", true),
+			Entry("src:target both with spaces", "/host path/docker:/var lib/docker", "/var lib/docker", "/host path/docker", true),
+			Entry("src:target npm cache", "/host/npm:/root/.npm", "/root/.npm", "/host/npm", true),
+			Entry("src:target cargo cache", "/host/cargo:/usr/local/cargo/registry", "/usr/local/cargo/registry", "/host/cargo", true),
+			Entry("src:target with multiple colons", "/host/path:/container/path:extra", "/container/path:extra", "/host/path", true),
+
+			// Edge cases
+			Entry("empty source", ":/var/lib/docker", "/var/lib/docker", "", true),
+			Entry("empty target", "/host/docker:", "", "/host/docker", true),
+			Entry("just colon", ":", "", "", true),
+		)
+
+		When("validating cache paths", func() {
+			It("should validate target paths are absolute", func() {
+				cachePaths := []types.CachePath{
+					{Target: "relative/path", Source: ""},
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("cache target path 'relative/path' must be an absolute path"))
+			})
+
+			It("should validate source paths are absolute when provided", func() {
+				cachePaths := []types.CachePath{
+					{Target: "/var/lib/docker", Source: "relative/host/path"},
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("cache source path 'relative/host/path' must be an absolute path"))
+			})
+
+			It("should allow empty source paths (auto-generated)", func() {
+				cachePaths := []types.CachePath{
+					{Target: "/var/lib/docker", Source: ""},
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should validate absolute target and source paths", func() {
+				cachePaths := []types.CachePath{
+					{Target: "/var/lib/docker", Source: "/host/docker"},
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should reject /nix/store target paths", func() {
+				cachePaths := []types.CachePath{
+					{Target: "/nix/store", Source: "/host/nix"},
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("caching /nix/store is not supported"))
+			})
+
+			It("should validate multiple cache paths", func() {
+				cachePaths := []types.CachePath{
+					{Target: "/var/lib/docker", Source: "/host/docker"},
+					{Target: "/root/.npm", Source: "/host/npm"},
+					{Target: "/usr/local/cargo/registry", Source: ""},
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should catch mixed valid and invalid paths", func() {
+				cachePaths := []types.CachePath{
+					{Target: "/var/lib/docker", Source: "/host/docker"}, // valid
+					{Target: "relative/path", Source: ""},               // invalid
+				}
+				err := validateCachePaths(cachePaths)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("relative/path"))
+			})
+		})
+
+		When("creating CachePath objects", func() {
+			It("should create correct CachePath from target-only input", func() {
+				input := "/var/lib/docker"
+				var source, target string
+
+				if strings.Contains(input, ":") {
+					parts := strings.SplitN(input, ":", 2)
+					source = parts[0]
+					target = parts[1]
+				} else {
+					target = input
+					source = ""
+				}
+
+				cachePath := types.CachePath{
+					Target: target,
+					Source: source,
+				}
+
+				Expect(cachePath.Target).To(Equal("/var/lib/docker"))
+				Expect(cachePath.Source).To(Equal(""))
+			})
+
+			It("should create correct CachePath from src:target input", func() {
+				input := "/host/persistent/docker:/var/lib/docker"
+				var source, target string
+
+				if strings.Contains(input, ":") {
+					parts := strings.SplitN(input, ":", 2)
+					source = parts[0]
+					target = parts[1]
+				} else {
+					target = input
+					source = ""
+				}
+
+				cachePath := types.CachePath{
+					Target: target,
+					Source: source,
+				}
+
+				Expect(cachePath.Target).To(Equal("/var/lib/docker"))
+				Expect(cachePath.Source).To(Equal("/host/persistent/docker"))
+			})
+		})
+	})
+})
 
 var _ = Describe("Repository URL Sanitization", func() {
 	// These tests ensure that repository URLs are properly sanitized to prevent
@@ -196,6 +361,33 @@ var _ = Describe("Container Mode Utilities", func() {
 		Expect(result).To(Equal("kubernetes"))
 	})
 })
+
+// validateCachePaths validates cache paths (extracted from validateAddParams for testing)
+func validateCachePaths(cachePaths []types.CachePath) error {
+	for _, cachePath := range cachePaths {
+		if cachePath.Target == "/nix/store" {
+			return fmt.Errorf(
+				"caching /nix/store is not supported in deskrun: " +
+					"mounting host paths directly to /nix/store breaks NixOS containers by overwriting essential NixOS binaries and libraries.\n\n" +
+					"To cache Nix packages, consider:\n" +
+					"1. Use the opencode-workspace-action with overlayfs support for /nix/store caching\n" +
+					"2. Cache alternative paths like /root/.cache/nix for user-level Nix cache\n" +
+					"3. Cache /var/lib/docker for Docker layer caching (unaffected by this limitation)\n\n" +
+					"See: https://github.com/rkoster/opencode-workspace-action/issues (overlay filesystem support for /nix/store)")
+		}
+
+		// Validate that target path is absolute
+		if !strings.HasPrefix(cachePath.Target, "/") {
+			return fmt.Errorf("cache target path '%s' must be an absolute path", cachePath.Target)
+		}
+
+		// Validate that source path is absolute when provided
+		if cachePath.Source != "" && !strings.HasPrefix(cachePath.Source, "/") {
+			return fmt.Errorf("cache source path '%s' must be an absolute path", cachePath.Source)
+		}
+	}
+	return nil
+}
 
 // validateParameters implements the validation logic that should exist in the add command
 // This serves as both a test and a specification for the actual implementation

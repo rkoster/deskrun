@@ -787,11 +787,10 @@ data:
           mountPath: /dev/shm`
 
 	// Add cache path volume mounts to job container
-	// Note: These volumes are defined in the hook extension, not the runner template
 	if len(installation.CachePaths) > 0 {
 		for i := range installation.CachePaths {
 			hookExtension += fmt.Sprintf("\n        - name: cache-%d\n          mountPath: %s",
-				i, installation.CachePaths[i].MountPath)
+				i, installation.CachePaths[i].Target)
 		}
 	}
 
@@ -827,7 +826,7 @@ data:
 	// Add cache path volumes to hook extension
 	if len(installation.CachePaths) > 0 {
 		for i, path := range installation.CachePaths {
-			hostPath := path.HostPath
+			hostPath := path.Source
 			if hostPath == "" {
 				// Generate instance-specific cache path for multi-instance setups
 				if instanceNum > 0 {

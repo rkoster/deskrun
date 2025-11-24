@@ -27,8 +27,10 @@ type RunnerInstallation struct {
 
 // CachePath represents a path to be cached using hostPath volumes
 type CachePath struct {
-	MountPath string
-	HostPath  string
+	// Target path inside the container where the cache will be mounted
+	Target string
+	// Source path on the host machine (empty means auto-generated)
+	Source string
 }
 
 // AuthType represents the authentication type

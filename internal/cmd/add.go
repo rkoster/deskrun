@@ -52,6 +52,14 @@ Examples:
     --max-runners 5 \
     --auth-type pat --auth-value ghp_xxx
 
+  # Add a privileged runner with custom source and target cache paths
+  deskrun add custom-runner \
+    --repository https://github.com/owner/repo \
+    --mode cached-privileged-kubernetes \
+    --cache /host/cache/npm:/root/.npm \
+    --cache /host/cache/cargo:/usr/local/cargo/registry \
+    --auth-type pat --auth-value ghp_xxx
+
   # Add a privileged runner with 3 instances for cache isolation
   # Each instance runs exactly 1 runner with dedicated cache paths
   deskrun add nix-runner \
@@ -77,7 +85,7 @@ func init() {
 	addCmd.Flags().IntVar(&addInstances, "instances", 1, "Number of separate runner scale set instances (each will have min=1, max=1 for cache isolation)")
 	addCmd.Flags().StringVar(&addAuthType, "auth-type", "pat", "Authentication type (pat, github-app)")
 	addCmd.Flags().StringVar(&addAuthValue, "auth-value", "", "Authentication value (PAT token or GitHub App private key)")
-	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Cache paths to mount (can be specified multiple times)")
+	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Cache paths to mount. Format: target or src:target (can be specified multiple times)")
 
 	addCmd.MarkFlagRequired("repository")
 	addCmd.MarkFlagRequired("auth-value")
@@ -118,9 +126,25 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Create cache paths
 	cachePaths := []types.CachePath{}
 	for _, path := range addCachePaths {
+		// Parse src:target notation
+		var source, target string
+		if strings.Contains(path, ":") {
+			parts := strings.SplitN(path, ":", 2)
+			if len(parts) == 2 {
+				source = parts[0]
+				target = parts[1]
+			} else {
+				return fmt.Errorf("invalid cache path format '%s', expected src:target or just target", path)
+			}
+		} else {
+			// Single path provided - use as target path, auto-generate source path
+			target = path
+			source = "" // Will be auto-generated
+		}
+
 		cachePaths = append(cachePaths, types.CachePath{
-			MountPath: path,
-			HostPath:  "", // Will be auto-generated
+			Target: target,
+			Source: source,
 		})
 	}
 
@@ -177,7 +201,7 @@ func validateAddParams(instances, maxRunners int, containerMode types.ContainerM
 
 	// Validate cache paths - provide helpful guidance for /nix/store
 	for _, cachePath := range cachePaths {
-		if cachePath.MountPath == "/nix/store" {
+		if cachePath.Target == "/nix/store" {
 			return fmt.Errorf(
 				"caching /nix/store is not supported in deskrun: " +
 					"mounting host paths directly to /nix/store breaks NixOS containers by overwriting essential NixOS binaries and libraries.\n\n" +
@@ -186,6 +210,16 @@ func validateAddParams(instances, maxRunners int, containerMode types.ContainerM
 					"2. Cache alternative paths like /root/.cache/nix for user-level Nix cache\n" +
 					"3. Cache /var/lib/docker for Docker layer caching (unaffected by this limitation)\n\n" +
 					"See: https://github.com/rkoster/opencode-workspace-action/issues (overlay filesystem support for /nix/store)")
+		}
+
+		// Validate that target path is absolute
+		if !strings.HasPrefix(cachePath.Target, "/") {
+			return fmt.Errorf("cache target path '%s' must be an absolute path", cachePath.Target)
+		}
+
+		// Validate that source path is absolute when provided
+		if cachePath.Source != "" && !strings.HasPrefix(cachePath.Source, "/") {
+			return fmt.Errorf("cache source path '%s' must be an absolute path", cachePath.Source)
 		}
 	}
 

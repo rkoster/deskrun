@@ -50,7 +50,7 @@ func TestGenerateRunnerScaleSetManifest_Privileged(t *testing.T) {
 		MinRunners:    1,
 		MaxRunners:    5,
 		CachePaths: []types.CachePath{
-			{MountPath: "/nix/store", HostPath: ""},
+			{Target: "/nix/store", Source: ""},
 		},
 		AuthType:  types.AuthTypePAT,
 		AuthValue: "test-token",
@@ -196,8 +196,8 @@ func TestGenerateNamespaceManifest(t *testing.T) {
 
 func TestGenerateVolumeMounts(t *testing.T) {
 	cachePaths := []types.CachePath{
-		{MountPath: "/nix/store", HostPath: ""},
-		{MountPath: "/root/.cache", HostPath: ""},
+		{Target: "/nix/store", Source: ""},
+		{Target: "/root/.cache", Source: ""},
 	}
 
 	result := generateVolumeMounts(cachePaths)
@@ -215,8 +215,8 @@ func TestGenerateVolumeMounts(t *testing.T) {
 
 func TestGenerateVolumes(t *testing.T) {
 	cachePaths := []types.CachePath{
-		{MountPath: "/nix/store", HostPath: "/custom/path"},
-		{MountPath: "/root/.cache", HostPath: ""},
+		{Target: "/nix/store", Source: "/custom/path"},
+		{Target: "/root/.cache", Source: ""},
 	}
 
 	result := generateVolumes(cachePaths, "test-installation")

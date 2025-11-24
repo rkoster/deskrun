@@ -58,6 +58,28 @@ This configuration:
 - Caches additional build artifacts at `/root/.cache`
 - Scales from 2 to 10 runners
 
+### 3a. Docker Build Runner with Custom Cache Paths
+
+For projects that need persistent cache paths across restarts:
+
+```bash
+deskrun add persistent-docker-runner \
+  --repository https://github.com/myorg/docker-project \
+  --mode cached-privileged-kubernetes \
+  --cache /host/persistent/docker:/var/lib/docker \
+  --cache /host/persistent/npm:/root/.npm \
+  --cache /host/persistent/cargo:/usr/local/cargo/registry \
+  --min-runners 2 \
+  --max-runners 10 \
+  --auth-type pat \
+  --auth-value ghp_your_github_pat_here
+```
+
+This configuration:
+- Uses persistent host paths for Docker, npm, and Cargo caches
+- Survives cluster restarts and rebuilds
+- Provides better cache persistence than auto-generated paths
+
 ### 4. Docker-in-Docker Runner
 
 For clean Docker environments without host contamination:
@@ -251,12 +273,24 @@ deskrun status
 
 ### 1. Cache Paths
 
-Common cache paths to consider:
+Common cache path configurations:
 
-- `/var/lib/docker` - Docker daemon data (images, containers)
-- `/root/.cache` - General application caches
-- `/home/runner/.cache` - User-level caches
-- `/tmp/build-cache` - Custom build caches
+**Auto-generated host paths:**
+- `--cache /var/lib/docker` - Docker daemon data (auto-generated host path)
+- `--cache /root/.cache` - General application caches
+- `--cache /home/runner/.cache` - User-level caches
+
+**Custom host paths for persistence:**
+- `--cache /host/persistent/docker:/var/lib/docker` - Persistent Docker cache
+- `--cache /host/persistent/npm:/root/.npm` - Persistent npm cache
+- `--cache /host/persistent/cargo:/usr/local/cargo/registry` - Persistent Cargo cache
+- `--cache /host/build-cache:/tmp/build-cache` - Custom build cache location
+
+**Benefits of custom host paths:**
+- Survive cluster restarts and rebuilds
+- Shared across multiple runner installations
+- Better cache performance with dedicated storage
+- Easier backup and management
 
 ### 2. Runner Scaling
 

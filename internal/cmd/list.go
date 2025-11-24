@@ -58,7 +58,11 @@ func runList(cmd *cobra.Command, args []string) error {
 				if i > 0 {
 					fmt.Printf("               ")
 				}
-				fmt.Printf("%s\n", path.MountPath)
+				if path.Source != "" {
+					fmt.Printf("%s:%s\n", path.Source, path.Target)
+				} else {
+					fmt.Printf("%s (auto-generated source)\n", path.Target)
+				}
 			}
 		}
 	}

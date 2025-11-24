@@ -66,6 +66,49 @@ func (m *Manager) Load() error {
 		return err
 	}
 
+	// First, try to unmarshal into a temporary structure that can handle both old and new formats
+	var rawConfig map[string]interface{}
+	if err := json.Unmarshal(data, &rawConfig); err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Check if we need to migrate from old format
+	needsMigration := false
+	if installations, ok := rawConfig["installations"].(map[string]interface{}); ok {
+		for _, installation := range installations {
+			if instMap, ok := installation.(map[string]interface{}); ok {
+				if cachePaths, ok := instMap["CachePaths"].([]interface{}); ok {
+					for _, cachePath := range cachePaths {
+						if cpMap, ok := cachePath.(map[string]interface{}); ok {
+							// Check if it has old field names
+							if _, hasMountPath := cpMap["MountPath"]; hasMountPath {
+								needsMigration = true
+								break
+							}
+							if _, hasHostPath := cpMap["HostPath"]; hasHostPath {
+								needsMigration = true
+								break
+							}
+						}
+					}
+				}
+			}
+			if needsMigration {
+				break
+			}
+		}
+	}
+
+	if needsMigration {
+		// Migrate old format to new format
+		if err := m.migrateConfig(data); err != nil {
+			return fmt.Errorf("failed to migrate config: %w", err)
+		}
+		// Save the migrated config
+		return m.Save()
+	}
+
+	// Parse as new format
 	m.config = &Config{}
 	if err := json.Unmarshal(data, m.config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
@@ -73,6 +116,72 @@ func (m *Manager) Load() error {
 
 	if m.config.Installations == nil {
 		m.config.Installations = make(map[string]*types.RunnerInstallation)
+	}
+
+	return nil
+}
+
+// migrateConfig migrates old config format to new format
+func (m *Manager) migrateConfig(data []byte) error {
+	// Define old CachePath structure
+	type OldCachePath struct {
+		MountPath string `json:"MountPath"`
+		HostPath  string `json:"HostPath"`
+	}
+
+	// Define old RunnerInstallation structure
+	type OldRunnerInstallation struct {
+		Name          string              `json:"Name"`
+		Repository    string              `json:"Repository"`
+		ContainerMode types.ContainerMode `json:"ContainerMode"`
+		MinRunners    int                 `json:"MinRunners"`
+		MaxRunners    int                 `json:"MaxRunners"`
+		Instances     int                 `json:"Instances"`
+		CachePaths    []OldCachePath      `json:"CachePaths"`
+		AuthType      types.AuthType      `json:"AuthType"`
+		AuthValue     string              `json:"AuthValue"`
+	}
+
+	// Define old Config structure
+	type OldConfig struct {
+		ClusterName   string                            `json:"cluster_name"`
+		Installations map[string]*OldRunnerInstallation `json:"installations"`
+	}
+
+	// Parse as old format
+	var oldConfig OldConfig
+	if err := json.Unmarshal(data, &oldConfig); err != nil {
+		return fmt.Errorf("failed to parse old config format: %w", err)
+	}
+
+	// Convert to new format
+	m.config = &Config{
+		ClusterName:   oldConfig.ClusterName,
+		Installations: make(map[string]*types.RunnerInstallation),
+	}
+
+	for name, oldInstallation := range oldConfig.Installations {
+		// Convert cache paths from old to new format
+		var newCachePaths []types.CachePath
+		for _, oldPath := range oldInstallation.CachePaths {
+			newCachePaths = append(newCachePaths, types.CachePath{
+				Target: oldPath.MountPath,
+				Source: oldPath.HostPath,
+			})
+		}
+
+		// Create new installation
+		m.config.Installations[name] = &types.RunnerInstallation{
+			Name:          oldInstallation.Name,
+			Repository:    oldInstallation.Repository,
+			ContainerMode: oldInstallation.ContainerMode,
+			MinRunners:    oldInstallation.MinRunners,
+			MaxRunners:    oldInstallation.MaxRunners,
+			Instances:     oldInstallation.Instances,
+			CachePaths:    newCachePaths,
+			AuthType:      oldInstallation.AuthType,
+			AuthValue:     oldInstallation.AuthValue,
+		}
 	}
 
 	return nil

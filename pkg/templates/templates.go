@@ -172,7 +172,7 @@ func generateVolumeMounts(cachePaths []types.CachePath) string {
 
 	for i, path := range cachePaths {
 		mounts = append(mounts, fmt.Sprintf("        - name: cache-%d", i))
-		mounts = append(mounts, fmt.Sprintf("          mountPath: %s", path.MountPath))
+		mounts = append(mounts, fmt.Sprintf("          mountPath: %s", path.Target))
 	}
 
 	return strings.Join(mounts, "\n")
@@ -189,7 +189,7 @@ func generateVolumes(cachePaths []types.CachePath, installationName string) stri
 	volumes = append(volumes, "        emptyDir: {}")
 
 	for i, path := range cachePaths {
-		hostPath := path.HostPath
+		hostPath := path.Source
 		if hostPath == "" {
 			// Generate default host path
 			hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installationName, i)
