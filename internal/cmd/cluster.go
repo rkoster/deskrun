@@ -51,8 +51,21 @@ func runClusterCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Detect available nix mounts
+	nixStore, nixSocket := cluster.DetectNixMounts()
+
+	// Log what we found
+	if nixStore != nil {
+		fmt.Printf("Detected Nix store at: %s\n", nixStore.HostPath)
+	}
+	if nixSocket != nil {
+		fmt.Printf("Detected Nix daemon socket at: %s\n", nixSocket.HostPath)
+	}
+
 	clusterConfig := &types.ClusterConfig{
-		Name: configMgr.GetConfig().ClusterName,
+		Name:      configMgr.GetConfig().ClusterName,
+		NixStore:  nixStore,
+		NixSocket: nixSocket,
 	}
 	clusterMgr := cluster.NewManager(clusterConfig)
 
@@ -69,12 +82,21 @@ func runClusterCreate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Creating kind cluster '%s'...\n", clusterConfig.Name)
+	fmt.Printf("Creating kind cluster '%s'", clusterConfig.Name)
+	if nixStore != nil || nixSocket != nil {
+		fmt.Print(" with Nix support")
+	}
+	fmt.Println("...")
+
 	if err := clusterMgr.Create(ctx); err != nil {
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
 
-	fmt.Printf("Cluster '%s' created successfully\n", clusterConfig.Name)
+	fmt.Printf("Cluster '%s' created successfully", clusterConfig.Name)
+	if nixStore != nil || nixSocket != nil {
+		fmt.Print(" with Nix bind mounts configured")
+	}
+	fmt.Println()
 	return nil
 }
 

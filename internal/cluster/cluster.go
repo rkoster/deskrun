@@ -3,8 +3,11 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/rkoster/deskrun/pkg/types"
+	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster"
 )
 
@@ -50,8 +53,12 @@ func (m *Manager) Create(ctx context.Context) error {
 		return fmt.Errorf("cluster %s already exists", m.config.Name)
 	}
 
-	// Create cluster using kind Go package
+	// Build kind configuration with nix mounts
+	kindConfig := m.buildKindConfig()
+
+	// Create cluster using kind Go package with custom config
 	err = m.provider.Create(m.config.Name,
+		cluster.CreateWithV1Alpha4Config(kindConfig),
 		cluster.CreateWithWaitForReady(0), // Use default wait time
 	)
 	if err != nil {
@@ -79,6 +86,80 @@ func (m *Manager) Delete(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// DetectNixMounts detects available nix mounts on the host system
+func DetectNixMounts() (*types.NixMount, *types.NixMount) {
+	var nixStore, nixSocket *types.NixMount
+
+	// Check for /nix/store
+	if _, err := os.Stat("/nix/store"); err == nil {
+		nixStore = &types.NixMount{
+			HostPath:      "/nix/store",
+			ContainerPath: "/nix/store",
+		}
+	}
+
+	// Check for nix daemon socket
+	nixSocketPaths := []string{
+		"/nix/var/nix/daemon-socket/socket",
+		"/var/run/nix/daemon-socket/socket",
+	}
+
+	for _, socketPath := range nixSocketPaths {
+		if _, err := os.Stat(socketPath); err == nil {
+			nixSocket = &types.NixMount{
+				HostPath:      socketPath,
+				ContainerPath: "/nix/var/nix/daemon-socket/socket",
+			}
+			break
+		}
+	}
+
+	return nixStore, nixSocket
+}
+
+// buildKindConfig creates a kind cluster configuration with nix mounts
+func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
+	config := &v1alpha4.Cluster{
+		TypeMeta: v1alpha4.TypeMeta{
+			Kind:       "Cluster",
+			APIVersion: "kind.x-k8s.io/v1alpha4",
+		},
+		Name: m.config.Name,
+	}
+
+	// Add a single node configuration
+	node := v1alpha4.Node{
+		Role: v1alpha4.ControlPlaneRole,
+	}
+
+	// Add nix mounts if available
+	var extraMounts []v1alpha4.Mount
+
+	if m.config.NixStore != nil {
+		extraMounts = append(extraMounts, v1alpha4.Mount{
+			HostPath:      m.config.NixStore.HostPath,
+			ContainerPath: m.config.NixStore.ContainerPath,
+			Readonly:      true,
+		})
+	}
+
+	if m.config.NixSocket != nil {
+		// Create the directory for the socket if it doesn't exist
+		socketDir := filepath.Dir(m.config.NixSocket.ContainerPath)
+		extraMounts = append(extraMounts, v1alpha4.Mount{
+			HostPath:      filepath.Dir(m.config.NixSocket.HostPath),
+			ContainerPath: socketDir,
+		})
+	}
+
+	if len(extraMounts) > 0 {
+		node.ExtraMounts = extraMounts
+	}
+
+	config.Nodes = []v1alpha4.Node{node}
+	return config
 }
 
 // GetKubeconfig returns the kubeconfig context name for the cluster
