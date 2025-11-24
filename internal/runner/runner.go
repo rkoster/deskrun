@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -51,6 +52,20 @@ func NewManager(clusterManager *cluster.Manager) *Manager {
 	}
 }
 
+// customWarningHandler is a warning handler that filters out unrecognized format warnings
+// It implements the rest.WarningHandler interface
+type customWarningHandler struct{}
+
+func (h customWarningHandler) HandleWarningHeader(code int, agent string, text string) {
+	// Filter out unrecognized format warnings to reduce noise
+	if strings.Contains(text, "unrecognized format") &&
+		(strings.Contains(text, "int32") || strings.Contains(text, "int64")) {
+		return // Skip these warnings
+	}
+	// For other warnings, print them normally (this mimics the default behavior)
+	fmt.Printf("Warning: %s\n", text)
+}
+
 // getKubernetesClient creates a Kubernetes clientset
 func (m *Manager) getKubernetesClient() (*kubernetes.Clientset, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -62,6 +77,10 @@ func (m *Manager) getKubernetesClient() (*kubernetes.Clientset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
+
+	// Set custom warning handler to filter out unrecognized format warnings
+	// This cast ensures we use the rest package
+	config.WarningHandler = rest.WarningHandler(customWarningHandler{})
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -82,6 +101,9 @@ func (m *Manager) getDynamicClient() (dynamic.Interface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
+
+	// Set custom warning handler to filter out unrecognized format warnings
+	config.WarningHandler = rest.WarningHandler(customWarningHandler{})
 
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
