@@ -657,7 +657,7 @@ func (m *Manager) generateHelmValues(installation *deskruntypes.RunnerInstallati
 		}
 	case deskruntypes.ContainerModePrivileged:
 		// For privileged mode, we need to parse the generated YAML string into a map
-		containerModeYAML := m.generatePrivilegedContainerMode(installation, instanceNum)
+		containerModeYAML := m.generatePrivilegedContainerMode(installation, instanceName, instanceNum)
 		// The function returns the full "containerMode: ..." structure, so parse it into a temp object
 		tempConfig := make(map[string]interface{})
 		if err := yaml.Unmarshal([]byte(containerModeYAML), &tempConfig); err != nil {
@@ -703,7 +703,7 @@ func (m *Manager) generateHelmValues(installation *deskruntypes.RunnerInstallati
 // generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
 // using ARC's hook extension pattern to inject privileged context into job containers only.
 // Uses kubernetes-novolume mode to avoid PVC complications - ephemeral storage is handled by the hook extension.
-func (m *Manager) generatePrivilegedContainerMode(installation *deskruntypes.RunnerInstallation, instanceNum int) string {
+func (m *Manager) generatePrivilegedContainerMode(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) string {
 	config := `containerMode:
   type: "kubernetes-novolume"
 template:
@@ -739,10 +739,11 @@ template:
 
 	// Define only the hook-extension volume
 	// Cache volumes are only needed for job containers and are defined in the hook extension
+	configMapName := fmt.Sprintf("privileged-hook-extension-%s", instanceName)
 	config += "\n    volumes:"
 	config += "\n    - name: hook-extension"
 	config += "\n      configMap:"
-	config += "\n        name: privileged-hook-extension"
+	config += fmt.Sprintf("\n        name: %s", configMapName)
 	config += "\n        defaultMode: 0755"
 
 	return config
@@ -758,11 +759,12 @@ func (m *Manager) generateHookExtensionConfigMap(installation *deskruntypes.Runn
 	// This patch adds privileged context and capabilities only to job containers
 	// The "$job" placeholder targets the job container created by the runner
 	// NOTE: We do NOT include "work" volume or "cgroup2" (which may not exist) in the patch
-	hookExtension := `apiVersion: v1
+	configMapName := fmt.Sprintf("privileged-hook-extension-%s", instanceName)
+	hookExtension := fmt.Sprintf(`apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: privileged-hook-extension
-  namespace: ` + defaultNamespace + `
+  name: %s
+  namespace: %s`, configMapName, defaultNamespace) + `
 data:
   content: |
     spec:
