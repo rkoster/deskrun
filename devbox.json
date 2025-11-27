@@ -4,8 +4,6 @@
     "gnumake@latest",
     "go@latest",
     "kubernetes-helm@latest",
-    "ytt@latest",
-    "kapp@latest",
     "gh@latest"
   ],
   "shell": {
