@@ -3,7 +3,9 @@
   "packages": [
     "gnumake@latest",
     "go@latest",
-    "kubernetes-helm@latest"
+    "kubernetes-helm@latest",
+    "ytt@latest",
+    "kapp@latest"
   ],
   "shell": {
     "init_hook": [
