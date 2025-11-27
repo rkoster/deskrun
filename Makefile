@@ -114,6 +114,8 @@ vendor-charts:
 		--namespace arc-systems \
 		--set githubConfigUrl=https://github.com/example/repo \
 		--set githubConfigSecret.github_token=placeholder \
+		--set controllerServiceAccount.name=arc-gha-rs-controller \
+		--set controllerServiceAccount.namespace=arc-systems \
 		> config/arc/_ytt_lib/scale-set/rendered.yaml
 	@echo "ARC scale-set chart rendered to config/arc/_ytt_lib/scale-set/rendered.yaml"
 	@echo ""

@@ -3,10 +3,7 @@
   "packages": [
     "gnumake@latest",
     "go@latest",
-    "helm@latest",
-    "carvel-vendir@latest",
-    "carvel-kapp@latest",
-    "carvel-ytt@latest"
+    "kubernetes-helm@latest"
   ],
   "shell": {
     "init_hook": [
