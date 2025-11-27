@@ -1,0 +1,26 @@
+#@ load("@ytt:data", "data")
+#@ load("@ytt:overlay", "overlay")
+
+#! Overlay for kubernetes container mode (default)
+#! This mode uses GitHub Actions runner in standard Kubernetes pod
+
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+spec:
+  #@overlay/match missing_ok=True
+  githubConfigUrl: #@ data.values.installation.repository
+  minRunners: #@ data.values.installation.minRunners
+  maxRunners: #@ data.values.installation.maxRunners
+  runnerScaleSetName: #@ data.values.installation.name
+  
+  template:
+    spec:
+      containers:
+      #@overlay/match by="name"
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+        #@overlay/append
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          value: "true"

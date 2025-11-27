@@ -1,0 +1,54 @@
+#@ load("@ytt:data", "data")
+#@ load("@ytt:overlay", "overlay")
+
+#! Overlay for privileged container mode
+#! This mode grants privileged access and mounts Docker socket
+
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+spec:
+  #@overlay/match missing_ok=True
+  githubConfigUrl: #@ data.values.installation.repository
+  minRunners: #@ data.values.installation.minRunners
+  maxRunners: #@ data.values.installation.maxRunners
+  runnerScaleSetName: #@ data.values.installation.name
+  
+  template:
+    spec:
+      securityContext:
+        #@overlay/match missing_ok=True
+        fsGroup: 123
+      
+      containers:
+      #@overlay/match by="name"
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        securityContext:
+          #@overlay/match missing_ok=True
+          privileged: true
+        volumeMounts:
+        #@overlay/append
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+        #@ if len(data.values.installation.cachePaths) > 0:
+        #@ for i, path in enumerate(data.values.installation.cachePaths):
+        - name: #@ "cache-{}".format(i)
+          mountPath: #@ path
+        #@ end
+        #@ end
+      
+      volumes:
+      #@overlay/append
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+      #@ if len(data.values.installation.cachePaths) > 0:
+      #@ for i, path in enumerate(data.values.installation.cachePaths):
+      - name: #@ "cache-{}".format(i)
+        hostPath:
+          path: #@ path
+          type: DirectoryOrCreate
+      #@ end
+      #@ end

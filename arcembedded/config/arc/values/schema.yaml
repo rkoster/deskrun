@@ -1,0 +1,33 @@
+#@data/values-schema
+---
+#@schema/desc "GitHub configuration for ARC"
+github:
+  #@schema/desc "GitHub config URL (repo or org)"
+  configUrl: ""
+  #@schema/desc "GitHub PAT token secret name"
+  configSecret: ""
+
+#@schema/desc "Runner configuration"
+runner:
+  #@schema/desc "Runner name/prefix"
+  name: ""
+  #@schema/desc "Namespace for runner deployment"
+  namespace: "arc-systems"
+  #@schema/desc "Container mode: kubernetes, privileged, or dind"
+  #@schema/validation one_of=["kubernetes", "privileged", "dind"]
+  containerMode: "kubernetes"
+  #@schema/desc "Runner image (defaults to ghcr.io/actions/actions-runner)"
+  image: ""
+  #@schema/desc "Resource limits and requests"
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+
+#@schema/desc "Cache mount configurations"
+cache:
+  #@schema/desc "List of cache paths to mount"
+  paths: []
