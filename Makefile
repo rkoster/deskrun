@@ -1,4 +1,4 @@
-.PHONY: build test clean install lint fmt help runner-update
+.PHONY: build test clean install lint fmt help runner-update vendor-charts
 
 # Binary name
 BINARY_NAME=deskrun
@@ -22,6 +22,7 @@ help:
 	@echo "  check           - Run linter and tests"
 	@echo "  dev             - Build and run the binary"
 	@echo "  runner-update   - Update test runner with Nix and Docker caching (requires gh CLI)"
+	@echo "  vendor-charts   - Render and vendor ARC Helm charts to YAML"
 	@echo "  help            - Show this help message"
 
 # Build the binary
@@ -93,3 +94,27 @@ runner-update:
 	go run ./cmd/deskrun up && \
 	echo "" && \
 	echo "Runner updated successfully!"
+
+# Vendor ARC charts by rendering them with Helm
+vendor-charts:
+	@echo "Rendering ARC controller chart v0.13.0..."
+	@mkdir -p config/arc/_ytt_lib/controller
+	@helm template arc-controller \
+		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+		--version 0.13.0 \
+		--namespace arc-systems \
+		> config/arc/_ytt_lib/controller/rendered.yaml
+	@echo "ARC controller chart rendered to config/arc/_ytt_lib/controller/rendered.yaml"
+	@echo ""
+	@echo "Rendering ARC scale-set chart v0.13.0..."
+	@mkdir -p config/arc/_ytt_lib/scale-set
+	@helm template arc-runner \
+		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+		--version 0.13.0 \
+		--namespace arc-systems \
+		--set githubConfigUrl=https://github.com/example/repo \
+		--set githubConfigSecret.github_token=placeholder \
+		> config/arc/_ytt_lib/scale-set/rendered.yaml
+	@echo "ARC scale-set chart rendered to config/arc/_ytt_lib/scale-set/rendered.yaml"
+	@echo ""
+	@echo "Charts rendered successfully! These files are now ready to be used with ytt overlays."
