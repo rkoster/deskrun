@@ -7,7 +7,7 @@ import (
 	"github.com/rkoster/deskrun/pkg/types"
 )
 
-func TestGenerateHelmValues_RepositoryLevel(t *testing.T) {
+func TestGenerateYTTDataValues_RepositoryLevel(t *testing.T) {
 	tests := []struct {
 		name            string
 		installation    *types.RunnerInstallation
@@ -69,23 +69,23 @@ func TestGenerateHelmValues_RepositoryLevel(t *testing.T) {
 			if tt.instanceNum > 0 {
 				instanceName = tt.installation.Name + "-" + string(rune('0'+tt.instanceNum))
 			}
-			got, err := m.generateHelmValues(tt.installation, instanceName, tt.instanceNum)
+			got, err := m.generateYTTDataValues(tt.installation, instanceName, tt.instanceNum)
 			if err != nil {
-				t.Fatalf("generateHelmValues() error = %v", err)
+				t.Fatalf("generateYTTDataValues() error = %v", err)
 			}
 
 			if tt.wantContains != "" && !strings.Contains(got, tt.wantContains) {
-				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantContains, got)
+				t.Errorf("generateYTTDataValues() output does not contain %q\nGot:\n%s", tt.wantContains, got)
 			}
 
 			if tt.wantNotContains != "" && strings.Contains(got, tt.wantNotContains) {
-				t.Errorf("generateHelmValues() output should not contain %q\nGot:\n%s", tt.wantNotContains, got)
+				t.Errorf("generateYTTDataValues() output should not contain %q\nGot:\n%s", tt.wantNotContains, got)
 			}
 		})
 	}
 }
 
-func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
+func TestGenerateYTTDataValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	installation := &types.RunnerInstallation{
 		Name:          "shared-runner",
 		Repository:    "https://github.com/owner/repo",
@@ -103,9 +103,9 @@ func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	var values []string
 	for i := 1; i <= installation.Instances; i++ {
 		instanceName := installation.Name + "-" + string(rune('0'+i))
-		val, err := m.generateHelmValues(installation, instanceName, i)
+		val, err := m.generateYTTDataValues(installation, instanceName, i)
 		if err != nil {
-			t.Fatalf("generateHelmValues() instance %d error = %v", i, err)
+			t.Fatalf("generateYTTDataValues() instance %d error = %v", i, err)
 		}
 		values = append(values, val)
 	}
@@ -119,7 +119,7 @@ func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	}
 }
 
-func TestGenerateHelmValues_MinMaxRunners(t *testing.T) {
+func TestGenerateYTTDataValues_MinMaxRunners(t *testing.T) {
 	tests := []struct {
 		name           string
 		minRunners     int
@@ -163,17 +163,17 @@ func TestGenerateHelmValues_MinMaxRunners(t *testing.T) {
 			}
 
 			m := &Manager{}
-			got, err := m.generateHelmValues(installation, "test-runner-1", 1)
+			got, err := m.generateYTTDataValues(installation, "test-runner-1", 1)
 			if err != nil {
-				t.Fatalf("generateHelmValues() error = %v", err)
+				t.Fatalf("generateYTTDataValues() error = %v", err)
 			}
 
 			if !strings.Contains(got, tt.wantMinRunners) {
-				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantMinRunners, got)
+				t.Errorf("generateYTTDataValues() output does not contain %q\nGot:\n%s", tt.wantMinRunners, got)
 			}
 
 			if !strings.Contains(got, tt.wantMaxRunners) {
-				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantMaxRunners, got)
+				t.Errorf("generateYTTDataValues() output does not contain %q\nGot:\n%s", tt.wantMaxRunners, got)
 			}
 		})
 	}
