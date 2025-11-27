@@ -193,54 +193,6 @@
         }
       }
     },
-    "kapp@latest": {
-      "last_modified": "2025-11-23T21:50:36Z",
-      "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#kapp",
-      "source": "devbox-search",
-      "version": "0.64.2",
-      "systems": {
-        "aarch64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/xkh86gd80l15bi79wca2g7zfn342193r-kapp-0.64.2",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/xkh86gd80l15bi79wca2g7zfn342193r-kapp-0.64.2"
-        },
-        "aarch64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/9zickgrnhm1ska9s9slhmyrpchn8ralg-kapp-0.64.2",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/9zickgrnhm1ska9s9slhmyrpchn8ralg-kapp-0.64.2"
-        },
-        "x86_64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/g1yc54paf33097zzgb3sqyksplr4zbx4-kapp-0.64.2",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/g1yc54paf33097zzgb3sqyksplr4zbx4-kapp-0.64.2"
-        },
-        "x86_64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/4d76zyjw9mcfp7hm4b6gcykgdm9g3jya-kapp-0.64.2",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/4d76zyjw9mcfp7hm4b6gcykgdm9g3jya-kapp-0.64.2"
-        }
-      }
-    },
     "kubernetes-helm@latest": {
       "last_modified": "2025-11-23T21:50:36Z",
       "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#kubernetes-helm",
@@ -286,54 +238,6 @@
             }
           ],
           "store_path": "/nix/store/b7g7s0jpfs93g7s1b556166mcswbkmcx-kubernetes-helm-3.19.1"
-        }
-      }
-    },
-    "ytt@latest": {
-      "last_modified": "2025-11-23T21:50:36Z",
-      "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#ytt",
-      "source": "devbox-search",
-      "version": "0.52.1",
-      "systems": {
-        "aarch64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/fiaqkvh612lrw0vfc91g393728xpb4j1-ytt-0.52.1",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/fiaqkvh612lrw0vfc91g393728xpb4j1-ytt-0.52.1"
-        },
-        "aarch64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/9sfnsyy072s9am4pi8ivrchh2d9kawnr-ytt-0.52.1",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/9sfnsyy072s9am4pi8ivrchh2d9kawnr-ytt-0.52.1"
-        },
-        "x86_64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/mkgvsfpz732yrv0xm1ql86czqbl8x1bl-ytt-0.52.1",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/mkgvsfpz732yrv0xm1ql86czqbl8x1bl-ytt-0.52.1"
-        },
-        "x86_64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/6490l0awz8y6hnb0hv5k5vlkl2243vrb-ytt-0.52.1",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/6490l0awz8y6hnb0hv5k5vlkl2243vrb-ytt-0.52.1"
         }
       }
     }
