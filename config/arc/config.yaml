@@ -1,0 +1,19 @@
+#@ load("@ytt:data", "data")
+#@ load("@ytt:overlay", "overlay")
+
+#! Main configuration template for ARC deployment
+#! This loads the vendored charts and applies appropriate overlays
+
+#@ load("@ytt:template", "template")
+
+#! Load controller chart
+--- #@ template.replace(overlay.apply(data.read("_ytt_lib/controller/rendered.yaml")))
+
+#! Load scale-set chart with overlays based on container mode
+#@ if data.values.installation.containerMode == "kubernetes":
+--- #@ template.replace(overlay.apply(data.read("_ytt_lib/scale-set/rendered.yaml"), data.read("overlays/container-mode-kubernetes.yaml")))
+#@ elif data.values.installation.containerMode == "privileged":
+--- #@ template.replace(overlay.apply(data.read("_ytt_lib/scale-set/rendered.yaml"), data.read("overlays/container-mode-privileged.yaml")))
+#@ elif data.values.installation.containerMode == "dind":
+--- #@ template.replace(overlay.apply(data.read("_ytt_lib/scale-set/rendered.yaml"), data.read("overlays/container-mode-dind.yaml")))
+#@ end

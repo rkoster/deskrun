@@ -1,0 +1,52 @@
+#@ load("@ytt:data", "data")
+#@ load("@ytt:overlay", "overlay")
+
+#! Overlay for Docker-in-Docker (dind) container mode
+#! This mode uses a sidecar Docker daemon container
+
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+spec:
+  #@overlay/match missing_ok=True
+  githubConfigUrl: #@ data.values.installation.repository
+  minRunners: #@ data.values.installation.minRunners
+  maxRunners: #@ data.values.installation.maxRunners
+  runnerScaleSetName: #@ data.values.installation.name
+  
+  template:
+    spec:
+      containers:
+      #@overlay/match by="name"
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+        #@overlay/append
+        - name: DOCKER_HOST
+          value: "tcp://localhost:2375"
+        volumeMounts:
+        #@overlay/append
+        - name: work
+          mountPath: /home/runner/_work
+      
+      #! Add dind sidecar container
+      #@overlay/append
+      - name: dind
+        image: docker:dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        volumeMounts:
+        - name: work
+          mountPath: /home/runner/_work
+        - name: dind-storage
+          mountPath: /var/lib/docker
+      
+      volumes:
+      #@overlay/append
+      - name: work
+        emptyDir: {}
+      - name: dind-storage
+        emptyDir: {}
