@@ -3,7 +3,7 @@ kind: Config
 minimumRequiredVersion: 0.12.0
 
 directories:
-  - path: config/arc/_ytt_lib
+  - path: arcembedded/config/arc/_ytt_lib
     contents:
       - path: controller
         manual: {}

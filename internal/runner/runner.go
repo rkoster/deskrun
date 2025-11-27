@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rkoster/deskrun/arcembedded"
 	"github.com/rkoster/deskrun/internal/cluster"
-	"github.com/rkoster/deskrun/internal/templates"
 	deskruntypes "github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -507,7 +507,10 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 		return fmt.Errorf("failed to create template dir: %w", err)
 	}
 	
-	templateFiles := templates.GetTemplateFiles()
+	templateFiles, err := arcembedded.GetTemplateFiles()
+	if err != nil {
+		return fmt.Errorf("failed to get embedded templates: %w", err)
+	}
 	for filename, content := range templateFiles {
 		filePath := filepath.Join(templateDir, filename)
 		fileDir := filepath.Dir(filePath)
@@ -966,7 +969,10 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	}
 	
 	// For the controller, we only need the controller chart rendered YAML
-	controllerYAML := templates.ControllerChart
+	controllerYAML, err := arcembedded.GetControllerChart()
+	if err != nil {
+		return fmt.Errorf("failed to get controller chart: %w", err)
+	}
 	controllerPath := filepath.Join(templateDir, "controller.yaml")
 	if err := os.WriteFile(controllerPath, []byte(controllerYAML), 0644); err != nil {
 		return fmt.Errorf("failed to write controller template: %w", err)

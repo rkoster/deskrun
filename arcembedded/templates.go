@@ -1,7 +1,9 @@
-package templates
+package arcembedded
 
 import (
 	"embed"
+	"io/fs"
+	"path/filepath"
 )
 
 // Embedded ARC templates using ytt format
@@ -15,24 +17,35 @@ var embeddedFS embed.FS
 func GetTemplateFiles() (map[string]string, error) {
 	files := map[string]string{}
 	
-	templatePaths := []string{
-		"config/arc/config.yaml",
-		"config/arc/values/schema.yaml",
-		"config/arc/_ytt_lib/controller/rendered.yaml",
-		"config/arc/_ytt_lib/scale-set/rendered.yaml",
-		"config/arc/overlays/container-mode-kubernetes.yaml",
-		"config/arc/overlays/container-mode-privileged.yaml",
-		"config/arc/overlays/container-mode-dind.yaml",
-	}
-	
-	for _, path := range templatePaths {
+	// Walk through all embedded files
+	err := fs.WalkDir(embeddedFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		
+		// Skip directories and .gitkeep files
+		if d.IsDir() || filepath.Base(path) == ".gitkeep" {
+			return nil
+		}
+		
+		// Read file content
 		content, err := embeddedFS.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		// Remove the "config/arc/" prefix for the key
-		key := path[11:] // len("config/arc/") = 11
+		
+		// Remove "config/arc/" prefix if present (11 chars)
+		key := path
+		if len(path) > 11 && path[:11] == "config/arc/" {
+			key = path[11:]
+		}
+		
 		files[key] = string(content)
+		return nil
+	})
+	
+	if err != nil {
+		return nil, err
 	}
 	
 	return files, nil
