@@ -1,19 +1,16 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"carvel.dev/kapp/pkg/kapp/cmd"
-	"github.com/cppforlife/go-cli-ui/ui"
 	"github.com/rkoster/deskrun/arcembedded"
 	"github.com/rkoster/deskrun/internal/cluster"
+	"github.com/rkoster/deskrun/internal/kapp"
 	deskruntypes "github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -49,6 +46,11 @@ func NewManager(clusterManager *cluster.Manager) *Manager {
 	return &Manager{
 		clusterManager: clusterManager,
 	}
+}
+
+// getKappClient returns a kapp client configured for the current cluster
+func (m *Manager) getKappClient() *kapp.Client {
+	return kapp.NewClient(m.clusterManager.GetKubeconfig(), defaultNamespace)
 }
 
 // customWarningHandler is a warning handler that filters out unrecognized format warnings
@@ -314,183 +316,6 @@ func (m *Manager) waitForCRD(ctx context.Context, crdName string) error {
 	})
 }
 
-// executeYTT executes ytt CLI to process templates with data values
-func (m *Manager) executeYTT(templateDir string, dataValuesPath string) (string, error) {
-	cmd := exec.Command("ytt",
-		"-f", templateDir,
-		"--data-values-file", dataValuesPath,
-	)
-	
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("ytt failed: %w\nstderr: %s", err, stderr.String())
-	}
-	
-	return stdout.String(), nil
-}
-
-// executeKappDeploy deploys resources using kapp as a Go package
-func (m *Manager) executeKappDeploy(appName string, manifestPath string) error {
-	kubeconfig := m.clusterManager.GetKubeconfig()
-	
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-	
-	// Create the kapp command
-	kappCmd := cmd.NewDefaultKappCmd(confUI)
-	
-	// Set the command args
-	kappCmd.SetArgs([]string{
-		"deploy",
-		"-a", appName,
-		"-f", manifestPath,
-		"--kubeconfig-context", kubeconfig,
-		"-n", defaultNamespace,
-		"-y", // auto-confirm
-	})
-	
-	// Capture output
-	kappCmd.SetOut(&outBuf)
-	kappCmd.SetErr(&errBuf)
-	
-	// Execute the command
-	if err := kappCmd.Execute(); err != nil {
-		return fmt.Errorf("kapp deploy failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
-	}
-	
-	return nil
-}
-
-// executeKappDelete deletes an app using kapp as a Go package
-func (m *Manager) executeKappDelete(appName string) error {
-	kubeconfig := m.clusterManager.GetKubeconfig()
-	
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-	
-	// Create the kapp command
-	kappCmd := cmd.NewDefaultKappCmd(confUI)
-	
-	// Set the command args
-	kappCmd.SetArgs([]string{
-		"delete",
-		"-a", appName,
-		"--kubeconfig-context", kubeconfig,
-		"-n", defaultNamespace,
-		"-y", // auto-confirm
-	})
-	
-	// Capture output
-	kappCmd.SetOut(&outBuf)
-	kappCmd.SetErr(&errBuf)
-	
-	// Execute the command
-	if err := kappCmd.Execute(); err != nil {
-		return fmt.Errorf("kapp delete failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
-	}
-	
-	return nil
-}
-
-// executeKappList lists all kapp apps using kapp as a Go package
-func (m *Manager) executeKappList() ([]string, error) {
-	kubeconfig := m.clusterManager.GetKubeconfig()
-	
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-	
-	// Create the kapp command
-	kappCmd := cmd.NewDefaultKappCmd(confUI)
-	
-	// Set the command args
-	kappCmd.SetArgs([]string{
-		"list",
-		"--kubeconfig-context", kubeconfig,
-		"-n", defaultNamespace,
-		"--json",
-	})
-	
-	// Capture output
-	kappCmd.SetOut(&outBuf)
-	kappCmd.SetErr(&errBuf)
-	
-	// Execute the command
-	if err := kappCmd.Execute(); err != nil {
-		// If namespace doesn't exist, return empty list
-		if strings.Contains(errBuf.String(), "not found") {
-			return []string{}, nil
-		}
-		return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, errBuf.String())
-	}
-	
-	// Parse JSON output to extract app names
-	var result struct {
-		Tables []struct {
-			Rows []struct {
-				Name string `yaml:"name"`
-			} `yaml:"rows"`
-		} `yaml:"tables"`
-	}
-	
-	if err := yaml.Unmarshal(outBuf.Bytes(), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp list output: %w", err)
-	}
-	
-	var names []string
-	if len(result.Tables) > 0 {
-		for _, row := range result.Tables[0].Rows {
-			// Exclude the ARC controller from the list
-			if row.Name != arcControllerAppName {
-				names = append(names, row.Name)
-			}
-		}
-	}
-	
-	return names, nil
-}
-
-// executeKappInspect inspects a kapp app using kapp as a Go package
-func (m *Manager) executeKappInspect(appName string) (string, error) {
-	kubeconfig := m.clusterManager.GetKubeconfig()
-	
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-	
-	// Create the kapp command
-	kappCmd := cmd.NewDefaultKappCmd(confUI)
-	
-	// Set the command args
-	kappCmd.SetArgs([]string{
-		"inspect",
-		"-a", appName,
-		"--kubeconfig-context", kubeconfig,
-		"-n", defaultNamespace,
-		"--json",
-	})
-	
-	// Capture output
-	kappCmd.SetOut(&outBuf)
-	kappCmd.SetErr(&errBuf)
-	
-	// Execute the command
-	if err := kappCmd.Execute(); err != nil {
-		return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
-	}
-	
-	return outBuf.String(), nil
-}
-
 // Install installs a runner scale set
 func (m *Manager) Install(ctx context.Context, installation *deskruntypes.RunnerInstallation) error {
 	// Ensure cluster exists
@@ -591,7 +416,8 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 	}
 
 	// Execute ytt to process templates
-	processedYAML, err := m.executeYTT(templateDir, dataValuesPath)
+	kappClient := m.getKappClient()
+	processedYAML, err := kappClient.ProcessTemplate(templateDir, dataValuesPath)
 	if err != nil {
 		return fmt.Errorf("failed to process templates with ytt: %w", err)
 	}
@@ -604,7 +430,7 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 
 	// Deploy using kapp
 	appName := instanceName
-	if err := m.executeKappDeploy(appName, manifestPath); err != nil {
+	if err = kappClient.Deploy(appName, manifestPath); err != nil {
 		return fmt.Errorf("failed to deploy with kapp: %w", err)
 	}
 
@@ -620,7 +446,8 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 // Uninstall removes a runner scale set
 func (m *Manager) Uninstall(ctx context.Context, name string) error {
 	// Uninstall using kapp delete
-	if err := m.executeKappDelete(name); err != nil {
+	kappClient := m.getKappClient()
+	if err := kappClient.Delete(name); err != nil {
 		return fmt.Errorf("failed to uninstall runner: %w", err)
 	}
 
@@ -630,19 +457,29 @@ func (m *Manager) Uninstall(ctx context.Context, name string) error {
 // List returns all runner scale sets
 func (m *Manager) List(ctx context.Context) ([]string, error) {
 	// List kapp apps
-	names, err := m.executeKappList()
+	kappClient := m.getKappClient()
+	names, err := kappClient.List()
 	if err != nil {
 		// If namespace doesn't exist, return empty list
 		return []string{}, nil
 	}
 
-	return names, nil
+	// Filter out the ARC controller from the list
+	var runnerNames []string
+	for _, name := range names {
+		if name != arcControllerAppName {
+			runnerNames = append(runnerNames, name)
+		}
+	}
+
+	return runnerNames, nil
 }
 
 // Status returns the status of a runner installation
 func (m *Manager) Status(ctx context.Context, name string) (string, error) {
 	// Get kapp app status
-	inspectOutput, err := m.executeKappInspect(name)
+	kappClient := m.getKappClient()
+	inspectOutput, err := kappClient.Inspect(name)
 	if err != nil {
 		return "", fmt.Errorf("failed to get status: %w", err)
 	}
@@ -1026,7 +863,8 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 
 	// Deploy controller using kapp (no ytt processing needed for controller - it's pre-rendered)
 	appName := arcControllerAppName
-	if err := m.executeKappDeploy(appName, controllerPath); err != nil {
+	kappClient := m.getKappClient()
+	if err := kappClient.Deploy(appName, controllerPath); err != nil {
 		// Check if already installed
 		if strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Controller already installed")
