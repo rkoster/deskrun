@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"carvel.dev/kapp/pkg/kapp/cmd"
+	"github.com/cppforlife/go-cli-ui/ui"
 	"github.com/rkoster/deskrun/arcembedded"
 	"github.com/rkoster/deskrun/internal/cluster"
 	deskruntypes "github.com/rkoster/deskrun/pkg/types"
@@ -330,71 +332,104 @@ func (m *Manager) executeYTT(templateDir string, dataValuesPath string) (string,
 	return stdout.String(), nil
 }
 
-// executeKappDeploy deploys resources using kapp
+// executeKappDeploy deploys resources using kapp as a Go package
 func (m *Manager) executeKappDeploy(appName string, manifestPath string) error {
 	kubeconfig := m.clusterManager.GetKubeconfig()
 	
-	cmd := exec.Command("kapp", "deploy",
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+	
+	// Create the kapp command
+	kappCmd := cmd.NewDefaultKappCmd(confUI)
+	
+	// Set the command args
+	kappCmd.SetArgs([]string{
+		"deploy",
 		"-a", appName,
 		"-f", manifestPath,
 		"--kubeconfig-context", kubeconfig,
 		"-n", defaultNamespace,
 		"-y", // auto-confirm
-	)
+	})
 	
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Capture output
+	kappCmd.SetOut(&outBuf)
+	kappCmd.SetErr(&errBuf)
 	
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kapp deploy failed: %w\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	// Execute the command
+	if err := kappCmd.Execute(); err != nil {
+		return fmt.Errorf("kapp deploy failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
 	}
 	
 	return nil
 }
 
-// executeKappDelete deletes an app using kapp
+// executeKappDelete deletes an app using kapp as a Go package
 func (m *Manager) executeKappDelete(appName string) error {
 	kubeconfig := m.clusterManager.GetKubeconfig()
 	
-	cmd := exec.Command("kapp", "delete",
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+	
+	// Create the kapp command
+	kappCmd := cmd.NewDefaultKappCmd(confUI)
+	
+	// Set the command args
+	kappCmd.SetArgs([]string{
+		"delete",
 		"-a", appName,
 		"--kubeconfig-context", kubeconfig,
 		"-n", defaultNamespace,
 		"-y", // auto-confirm
-	)
+	})
 	
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Capture output
+	kappCmd.SetOut(&outBuf)
+	kappCmd.SetErr(&errBuf)
 	
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kapp delete failed: %w\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	// Execute the command
+	if err := kappCmd.Execute(); err != nil {
+		return fmt.Errorf("kapp delete failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
 	}
 	
 	return nil
 }
 
-// executeKappList lists all kapp apps
+// executeKappList lists all kapp apps using kapp as a Go package
 func (m *Manager) executeKappList() ([]string, error) {
 	kubeconfig := m.clusterManager.GetKubeconfig()
 	
-	cmd := exec.Command("kapp", "list",
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+	
+	// Create the kapp command
+	kappCmd := cmd.NewDefaultKappCmd(confUI)
+	
+	// Set the command args
+	kappCmd.SetArgs([]string{
+		"list",
 		"--kubeconfig-context", kubeconfig,
 		"-n", defaultNamespace,
 		"--json",
-	)
+	})
 	
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Capture output
+	kappCmd.SetOut(&outBuf)
+	kappCmd.SetErr(&errBuf)
 	
-	if err := cmd.Run(); err != nil {
+	// Execute the command
+	if err := kappCmd.Execute(); err != nil {
 		// If namespace doesn't exist, return empty list
-		if strings.Contains(stderr.String(), "not found") {
+		if strings.Contains(errBuf.String(), "not found") {
 			return []string{}, nil
 		}
-		return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, stderr.String())
+		return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, errBuf.String())
 	}
 	
 	// Parse JSON output to extract app names
@@ -406,7 +441,7 @@ func (m *Manager) executeKappList() ([]string, error) {
 		} `yaml:"tables"`
 	}
 	
-	if err := yaml.Unmarshal(stdout.Bytes(), &result); err != nil {
+	if err := yaml.Unmarshal(outBuf.Bytes(), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse kapp list output: %w", err)
 	}
 	
@@ -423,26 +458,37 @@ func (m *Manager) executeKappList() ([]string, error) {
 	return names, nil
 }
 
-// executeKappInspect inspects a kapp app
+// executeKappInspect inspects a kapp app using kapp as a Go package
 func (m *Manager) executeKappInspect(appName string) (string, error) {
 	kubeconfig := m.clusterManager.GetKubeconfig()
 	
-	cmd := exec.Command("kapp", "inspect",
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+	
+	// Create the kapp command
+	kappCmd := cmd.NewDefaultKappCmd(confUI)
+	
+	// Set the command args
+	kappCmd.SetArgs([]string{
+		"inspect",
 		"-a", appName,
 		"--kubeconfig-context", kubeconfig,
 		"-n", defaultNamespace,
 		"--json",
-	)
+	})
 	
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Capture output
+	kappCmd.SetOut(&outBuf)
+	kappCmd.SetErr(&errBuf)
 	
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, stderr.String())
+	// Execute the command
+	if err := kappCmd.Execute(); err != nil {
+		return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
 	}
 	
-	return stdout.String(), nil
+	return outBuf.String(), nil
 }
 
 // Install installs a runner scale set
