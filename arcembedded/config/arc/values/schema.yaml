@@ -1,33 +1,37 @@
 #@data/values-schema
 ---
-#@schema/desc "GitHub configuration for ARC"
-github:
-  #@schema/desc "GitHub config URL (repo or org)"
-  configUrl: ""
-  #@schema/desc "GitHub PAT token secret name"
-  configSecret: ""
-
-#@schema/desc "Runner configuration"
-runner:
-  #@schema/desc "Runner name/prefix"
+#@schema/desc "Installation configuration"
+installation:
+  #@schema/desc "Installation name"
   name: ""
-  #@schema/desc "Namespace for runner deployment"
-  namespace: "arc-systems"
-  #@schema/desc "Container mode: kubernetes, privileged, or dind"
-  #@schema/validation one_of=["kubernetes", "privileged", "dind"]
+  
+  #@schema/desc "GitHub repository URL"
+  repository: ""
+  
+  #@schema/desc "Authentication value (PAT or GitHub App private key)"
+  authValue: ""
+  
+  #@schema/desc "Container mode - must be one of: kubernetes, dind, cached-privileged-kubernetes"
+  #@schema/validation ("data.values.installation.containerMode in ['kubernetes', 'dind', 'cached-privileged-kubernetes']", "containerMode must be one of: kubernetes, dind, cached-privileged-kubernetes")
   containerMode: "kubernetes"
-  #@schema/desc "Runner image (defaults to ghcr.io/actions/actions-runner)"
-  image: ""
-  #@schema/desc "Resource limits and requests"
-  resources:
-    limits:
-      cpu: "1"
-      memory: "2Gi"
-    requests:
-      cpu: "500m"
-      memory: "1Gi"
-
-#@schema/desc "Cache mount configurations"
-cache:
-  #@schema/desc "List of cache paths to mount"
-  paths: []
+  
+  #@schema/desc "Minimum number of runners"
+  #@schema/validation min=0
+  minRunners: 1
+  
+  #@schema/desc "Maximum number of runners"
+  #@schema/validation min=1
+  maxRunners: 3
+  
+  #@schema/desc "Cache path configurations for privileged mode"
+  #@schema/nullable
+  cachePaths:
+  - #@schema/desc "Cache path mapping"
+    #@schema/desc "Source path on host"
+    source: ""
+    #@schema/desc "Target path in container"  
+    target: ""
+  
+  #@schema/desc "Instance number for multi-instance deployments"
+  #@schema/validation min=0
+  instanceNum: 0

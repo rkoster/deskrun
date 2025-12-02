@@ -3,11 +3,11 @@ package kapp
 import (
 	"bytes"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	kappcmd "carvel.dev/kapp/pkg/kapp/cmd"
 	"github.com/cppforlife/go-cli-ui/ui"
-	yttcmd "github.com/k14s/ytt/pkg/cmd"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,28 +27,25 @@ func NewClient(kubeconfig, namespace string) *Client {
 
 // ProcessTemplate executes ytt to process templates with data values
 func (c *Client) ProcessTemplate(templateDir string, dataValuesPath string) (string, error) {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-
-	// Create the ytt command
-	yttCommand := yttcmd.NewDefaultYttCmd()
-
-	// Set the command args
-	yttCommand.SetArgs([]string{
+	// Use os/exec to run ytt directly, as the ytt library seems to have output redirection issues
+	cmd := exec.Command("ytt",
 		"-f", templateDir,
 		"--data-values-file", dataValuesPath,
-	})
+		"--file-mark", "scale-set.yaml:type=yaml-plain",
+	)
 
-	// Capture output
-	yttCommand.SetOut(&outBuf)
-	yttCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := yttCommand.Execute(); err != nil {
-		return "", fmt.Errorf("ytt failed: %w\nstderr: %s", err, errBuf.String())
+	output, err := cmd.Output()
+	if err != nil {
+		// Get stderr for better error reporting
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("ytt failed: %w\nstderr: %s", err, string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("ytt failed: %w", err)
 	}
 
-	return outBuf.String(), nil
+	result := string(output)
+
+	return result, nil
 }
 
 // Deploy deploys resources using kapp

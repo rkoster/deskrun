@@ -9,9 +9,6 @@
 spec:
   #@overlay/match missing_ok=True
   githubConfigUrl: #@ data.values.installation.repository
-  minRunners: #@ data.values.installation.minRunners
-  maxRunners: #@ data.values.installation.maxRunners
-  runnerScaleSetName: #@ data.values.installation.name
   
   template:
     spec:
@@ -20,10 +17,12 @@ spec:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
+        #@overlay/match missing_ok=True
         env:
         #@overlay/append
         - name: DOCKER_HOST
           value: "tcp://localhost:2375"
+        #@overlay/match missing_ok=True
         volumeMounts:
         #@overlay/append
         - name: work
@@ -44,6 +43,7 @@ spec:
         - name: dind-storage
           mountPath: /var/lib/docker
       
+      #@overlay/match missing_ok=True
       volumes:
       #@overlay/append
       - name: work

@@ -9,14 +9,11 @@
 spec:
   #@overlay/match missing_ok=True
   githubConfigUrl: #@ data.values.installation.repository
-  minRunners: #@ data.values.installation.minRunners
-  maxRunners: #@ data.values.installation.maxRunners
-  runnerScaleSetName: #@ data.values.installation.name
   
   template:
     spec:
+      #@overlay/match missing_ok=True
       securityContext:
-        #@overlay/match missing_ok=True
         fsGroup: 123
       
       containers:
@@ -24,9 +21,10 @@ spec:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
         command: ["/home/runner/run.sh"]
+        #@overlay/match missing_ok=True
         securityContext:
-          #@overlay/match missing_ok=True
           privileged: true
+        #@overlay/match missing_ok=True
         volumeMounts:
         #@overlay/append
         - name: docker-socket
@@ -38,6 +36,7 @@ spec:
         #@ end
         #@ end
       
+      #@overlay/match missing_ok=True
       volumes:
       #@overlay/append
       - name: docker-socket

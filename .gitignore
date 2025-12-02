@@ -34,3 +34,6 @@ Thumbs.db
 
 # Temporary files
 /tmp/
+
+# Generated config files (use arcembedded/config/ instead)
+/config/

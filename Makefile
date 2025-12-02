@@ -97,17 +97,31 @@ runner-update:
 
 # Vendor ARC charts by rendering them with Helm
 vendor-charts:
+	@echo "Downloading and extracting ARC controller chart v0.13.0..."
+	@rm -rf /tmp/arc-controller-chart
+	@mkdir -p /tmp/arc-controller-chart
+	@helm pull oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+		--version 0.13.0 \
+		--untar \
+		--untardir /tmp/arc-controller-chart
+	@echo ""
 	@echo "Rendering ARC controller chart v0.13.0..."
-	@mkdir -p config/arc/_ytt_lib/controller
+	@mkdir -p arcembedded/config/arc/_ytt_lib/controller
 	@helm template arc-controller \
 		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
 		--version 0.13.0 \
 		--namespace arc-systems \
-		> config/arc/_ytt_lib/controller/rendered.yaml
-	@echo "ARC controller chart rendered to config/arc/_ytt_lib/controller/rendered.yaml"
+		> arcembedded/config/arc/_ytt_lib/controller/rendered.yaml
+	@echo "ARC controller chart rendered to arcembedded/config/arc/_ytt_lib/controller/rendered.yaml"
+	@echo ""
+	@echo "Adding CRDs to controller chart..."
+	@mkdir -p arcembedded/config/arc/_ytt_lib/controller
+	@echo "---" >> arcembedded/config/arc/_ytt_lib/controller/rendered.yaml
+	@cat /tmp/arc-controller-chart/gha-runner-scale-set-controller/crds/*.yaml >> arcembedded/config/arc/_ytt_lib/controller/rendered.yaml
+	@echo "CRDs added to arcembedded/config/arc/_ytt_lib/controller/rendered.yaml"
 	@echo ""
 	@echo "Rendering ARC scale-set chart v0.13.0..."
-	@mkdir -p config/arc/_ytt_lib/scale-set
+	@mkdir -p arcembedded/config/arc/_ytt_lib/scale-set
 	@helm template arc-runner \
 		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
 		--version 0.13.0 \
@@ -116,7 +130,9 @@ vendor-charts:
 		--set githubConfigSecret.github_token=placeholder \
 		--set controllerServiceAccount.name=arc-gha-rs-controller \
 		--set controllerServiceAccount.namespace=arc-systems \
-		> config/arc/_ytt_lib/scale-set/rendered.yaml
-	@echo "ARC scale-set chart rendered to config/arc/_ytt_lib/scale-set/rendered.yaml"
+		> arcembedded/config/arc/_ytt_lib/scale-set/rendered.yaml
+	@echo "ARC scale-set chart rendered to arcembedded/config/arc/_ytt_lib/scale-set/rendered.yaml"
 	@echo ""
+	@echo "Cleaning up temporary files..."
+	@rm -rf /tmp/arc-controller-chart
 	@echo "Charts rendered successfully! These files are now ready to be used with ytt overlays."

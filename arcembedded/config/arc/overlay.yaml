@@ -1,0 +1,190 @@
+#@ load("@ytt:data", "data")
+#@ load("@ytt:overlay", "overlay")
+#@ load("@ytt:base64", "base64")
+
+#! Universal overlay that applies transformations based on container mode
+
+#! Apply name and repository transformations to all resources
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount"}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-no-permission"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#@overlay/match by=overlay.subset({"kind":"Secret"}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-github-secret"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+data:
+  github_token: #@ base64.encode(data.values.installation.authValue)
+
+#@overlay/match by=overlay.subset({"kind":"Role"}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#@overlay/match by=overlay.subset({"kind":"RoleBinding"}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+roleRef:
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+subjects:
+- kind: ServiceAccount
+  name: arc-controller-gha-rs-controller
+  namespace: arc-systems
+
+#! Apply transformations to AutoscalingRunnerSet based on container mode
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+  annotations:
+    actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
+    actions.github.com/cleanup-manager-role-binding: #@ data.values.installation.name + "-gha-rs-manager"
+    actions.github.com/cleanup-manager-role-name: #@ data.values.installation.name + "-gha-rs-manager"
+    actions.github.com/cleanup-no-permission-service-account-name: #@ data.values.installation.name + "-gha-rs-no-permission"
+spec:
+  githubConfigUrl: #@ data.values.installation.repository
+  githubConfigSecret: #@ data.values.installation.name + "-gha-rs-github-secret"
+  
+  template:
+    spec:
+      serviceAccountName: #@ data.values.installation.name + "-gha-rs-no-permission"
+      
+      #! Container mode specific configurations
+      #@ if data.values.installation.containerMode == "cached-privileged-kubernetes":
+      #@overlay/match missing_ok=True
+      securityContext:
+        fsGroup: 123
+      #@ end
+      
+      containers:
+      #@overlay/match by="name"
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        
+        #! Container mode specific security context
+        #@ if data.values.installation.containerMode == "cached-privileged-kubernetes":
+        #@overlay/match missing_ok=True
+        securityContext:
+          privileged: true
+        #@ end
+        
+        #@overlay/match missing_ok=True
+        env:
+        #! Add environment variables based on container mode
+        #@ if data.values.installation.containerMode == "kubernetes":
+        #@overlay/append
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          value: "true"
+        #@ elif data.values.installation.containerMode == "dind":
+        #@overlay/append
+        - name: DOCKER_HOST
+          value: "tcp://localhost:2375"
+        #@ elif data.values.installation.containerMode == "cached-privileged-kubernetes":
+        #@overlay/append
+        - name: ACTIONS_RUNNER_CONTAINER_HOOKS
+          value: "/home/runner/k8s-novolume/index.js"
+        #@overlay/append
+        - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+          value: "/etc/hooks/content"
+        #@overlay/append
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          value: "false"
+        #@ end
+        
+        #@overlay/match missing_ok=True
+        volumeMounts:
+        #! Add volume mounts based on container mode
+        #@ if data.values.installation.containerMode == "dind":
+        #@overlay/append
+        - name: work
+          mountPath: /home/runner/_work
+        #@ elif data.values.installation.containerMode == "cached-privileged-kubernetes":
+        #@overlay/append
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+        #@overlay/append
+        - name: hook-extension
+          mountPath: /etc/hooks
+          readOnly: true
+        #! Add cache path mounts for privileged mode
+        #@ if len(data.values.installation.cachePaths) > 0:
+        #@ for i, path in enumerate(data.values.installation.cachePaths):
+        #@overlay/append
+        - name: #@ "cache-{}".format(i)
+          mountPath: #@ path["target"]
+        #@ end
+        #@ end
+        #@ end
+
+      #! Add additional containers for dind mode
+      #@ if data.values.installation.containerMode == "dind":
+      #@overlay/append
+      - name: dind
+        image: docker:dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        volumeMounts:
+        - name: work
+          mountPath: /home/runner/_work
+        - name: dind-storage
+          mountPath: /var/lib/docker
+      #@ end
+      
+      #@overlay/match missing_ok=True
+      volumes:
+      #! Add volumes based on container mode
+      #@ if data.values.installation.containerMode == "dind":
+      #@overlay/append
+      - name: work
+        emptyDir: {}
+      #@overlay/append
+      - name: dind-storage
+        emptyDir: {}
+      #@ elif data.values.installation.containerMode == "cached-privileged-kubernetes":
+      #@overlay/append
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+      #@overlay/append
+      - name: hook-extension
+        configMap:
+          name: #@ "privileged-hook-extension-" + data.values.installation.name
+          defaultMode: 0755
+      #! Add cache path volumes for privileged mode
+      #@ if len(data.values.installation.cachePaths) > 0:
+      #@ for i, path in enumerate(data.values.installation.cachePaths):
+      #@overlay/append
+      - name: #@ "cache-{}".format(i)
+        hostPath:
+          path: #@ path["source"]
+          type: DirectoryOrCreate
+      #@ end
+      #@ end
+      #@ end
