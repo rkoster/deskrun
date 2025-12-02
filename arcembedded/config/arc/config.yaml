@@ -1,5 +1,134 @@
 #@ load("@ytt:data", "data")
-#@ load("@ytt:template", "template")
 
-#! Base scale-set chart
---- #@ template.replace(data.read("_ytt_lib/scale-set/rendered.yaml"))
+#! Base scale-set resources without template.replace
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arc-runner-gha-rs-no-permission
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: arc-runner
+    app.kubernetes.io/instance: arc-runner
+    app.kubernetes.io/version: "0.13.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: arc-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations:
+  finalizers:
+    - actions.github.com/cleanup-protection
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: arc-runner-gha-rs-github-secret
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: arc-runner
+    app.kubernetes.io/instance: arc-runner
+    app.kubernetes.io/version: "0.13.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: arc-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations:
+  finalizers:
+    - actions.github.com/cleanup-protection
+data:
+  github_token: cGxhY2Vob2xkZXI=
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: arc-runner-gha-rs-manager
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: arc-runner
+    app.kubernetes.io/instance: arc-runner
+    app.kubernetes.io/version: "0.13.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: arc-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations:
+rules:
+- apiGroups: 
+  - actions.github.com
+  resources: 
+  - ephemeralrunnersets
+  resourceNames: 
+  - arc-runner-runner-set
+  verbs: 
+  - patch
+- apiGroups: 
+  - actions.github.com
+  resources: 
+  - ephemeralrunners
+  - ephemeralrunners/status
+  verbs: 
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: arc-runner-gha-rs-manager
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: arc-runner
+    app.kubernetes.io/instance: arc-runner
+    app.kubernetes.io/version: "0.13.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: arc-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations:
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: arc-runner-gha-rs-manager
+subjects:
+- kind: ServiceAccount
+  name: arc-controller-gha-rs-controller
+  namespace: arc-systems
+---
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: arc-runner
+  namespace: arc-systems
+  labels:
+    app.kubernetes.io/component: "autoscaling-runner-set"
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: arc-runner
+    app.kubernetes.io/instance: arc-runner
+    app.kubernetes.io/version: "0.13.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: arc-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations:
+    actions.github.com/values-hash: 1f7e2e25cd46a1879cce3ccca83387e2ce41e747dd30ff17b6f6db794caf857
+    actions.github.com/cleanup-github-secret-name: arc-runner-gha-rs-github-secret
+    actions.github.com/cleanup-manager-role-binding: arc-runner-gha-rs-manager
+    actions.github.com/cleanup-manager-role-name: arc-runner-gha-rs-manager
+    actions.github.com/cleanup-no-permission-service-account-name: arc-runner-gha-rs-no-permission
+
+spec:
+  githubConfigUrl: https://github.com/example/repo
+  githubConfigSecret: arc-runner-gha-rs-github-secret
+
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: arc-runner-gha-rs-no-permission
+      containers:
+      - name: runner
+        command: 
+          - /home/runner/run.sh
+        image: 
+          ghcr.io/actions/actions-runner:latest

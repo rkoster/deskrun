@@ -1,5 +1,5 @@
 ---
-# Source: gha-runner-scale-set/templates/no_permission_serviceaccount.yaml
+#! Source: gha-runner-scale-set/templates/no_permission_serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -18,7 +18,7 @@ metadata:
   finalizers:
     - actions.github.com/cleanup-protection
 ---
-# Source: gha-runner-scale-set/templates/githubsecret.yaml
+#! Source: gha-runner-scale-set/templates/githubsecret.yaml
 apiVersion: v1
 kind: Secret
 metadata:
@@ -39,7 +39,7 @@ metadata:
 data:
   github_token: cGxhY2Vob2xkZXI=
 ---
-# Source: gha-runner-scale-set/templates/manager_role.yaml
+#! Source: gha-runner-scale-set/templates/manager_role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -116,7 +116,7 @@ rules:
   - patch
   - update
 ---
-# Source: gha-runner-scale-set/templates/manager_role_binding.yaml
+#! Source: gha-runner-scale-set/templates/manager_role_binding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -146,7 +146,7 @@ subjects:
   namespace: 
     arc-systems
 ---
-# Source: gha-runner-scale-set/templates/autoscalingrunnerset.yaml
+#! Source: gha-runner-scale-set/templates/autoscalingrunnerset.yaml
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
 metadata:

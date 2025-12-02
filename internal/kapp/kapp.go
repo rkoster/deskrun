@@ -31,7 +31,6 @@ func (c *Client) ProcessTemplate(templateDir string, dataValuesPath string) (str
 	cmd := exec.Command("ytt",
 		"-f", templateDir,
 		"--data-values-file", dataValuesPath,
-		"--file-mark", "scale-set.yaml:type=yaml-plain",
 	)
 
 	output, err := cmd.Output()

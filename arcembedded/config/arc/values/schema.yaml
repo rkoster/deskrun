@@ -12,7 +12,7 @@ installation:
   authValue: ""
   
   #@schema/desc "Container mode - must be one of: kubernetes, dind, cached-privileged-kubernetes"
-  #@schema/validation ("data.values.installation.containerMode in ['kubernetes', 'dind', 'cached-privileged-kubernetes']", "containerMode must be one of: kubernetes, dind, cached-privileged-kubernetes")
+  #@schema/validation one_of=["kubernetes", "dind", "cached-privileged-kubernetes"]
   containerMode: "kubernetes"
   
   #@schema/desc "Minimum number of runners"

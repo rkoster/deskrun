@@ -448,7 +448,8 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 	// List AutoscalingRunnerSet resources in the arc-systems namespace
 	list, err := dynamicClient.Resource(gvr).Namespace(defaultNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		// If the resource doesn't exist or namespace doesn't exist, return empty list
+		// If there's an error accessing the resources, return empty list with a note
+		// This handles cases where the CRD isn't installed yet or permissions are missing
 		return []string{}, nil
 	}
 
@@ -836,11 +837,19 @@ func (m *Manager) setupYttTemplateDir(installation *deskruntypes.RunnerInstallat
 		return "", fmt.Errorf("failed to write scale-set.yaml: %w", err)
 	}
 
-	// Replace static values with ytt data value expressions
+	// Replace static values with ytt data value expressions - be specific to avoid partial matches
 	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "https://github.com/example/repo", "#@ data.values.installation.repository")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner", "#@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-systems", "arc-systems") // Keep namespace fixed
+	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-github-secret", "#@ data.values.installation.name + \"-gha-rs-github-secret\"")
+	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-no-permission", "#@ data.values.installation.name + \"-gha-rs-no-permission\"")
+	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-manager", "#@ data.values.installation.name + \"-gha-rs-manager\"")
+	// Replace remaining arc-runner references (labels, names, etc.)
+	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "\"arc-runner\"", "#@ data.values.installation.name")
+	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, ": arc-runner", ": #@ data.values.installation.name")
+	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "name: arc-runner", "name: #@ data.values.installation.name")
 	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "placeholder", "#@ data.values.installation.authValue")
+
+	// Add ytt load directive at the beginning of the file
+	scaleSetYAML = "#@ load(\"@ytt:data\", \"data\")\n" + scaleSetYAML
 
 	// Write the base template
 	if err := os.WriteFile(scaleSetPath, []byte(scaleSetYAML), 0644); err != nil {

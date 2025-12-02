@@ -82,6 +82,7 @@ spec:
       #@overlay/match by="name"
       - name: runner
         image: ghcr.io/actions/actions-runner:latest
+        #@overlay/replace
         command: ["/home/runner/run.sh"]
         
         #! Container mode specific security context
