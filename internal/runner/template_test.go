@@ -1,256 +1,234 @@
 package runner
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/rkoster/deskrun/pkg/templates"
 	"github.com/rkoster/deskrun/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Test the string replacement logic to ensure it doesn't create invalid ytt syntax
-func TestStringReplacements(t *testing.T) {
+// TestPrivilegedContainerTemplateGeneration validates that ytt templates generate
+// proper privileged container configuration for workflow-managed Docker
+func TestPrivilegedContainerTemplateGeneration(t *testing.T) {
+	manager := &Manager{}
+
+	installation := &types.RunnerInstallation{
+		Name:          "rubionic-workspace",
+		Repository:    "https://github.com/rkoster/rubionic-workspace",
+		AuthValue:     "test-token",
+		ContainerMode: types.ContainerModePrivileged,
+		MinRunners:    1,
+		MaxRunners:    1,
+		CachePaths: []types.CachePath{
+			{Source: "/nix/store", Target: "/nix/store-host"},
+			{Source: "/nix/var/nix/daemon-socket", Target: "/nix/var/nix/daemon-socket-host"},
+			{Source: "/nvme/docker-cache", Target: "/var/lib/docker"}, // Docker image cache
+		},
+	}
+
+	// Generate data values for template processing
+	dataValues, err := manager.generateYTTDataValues(installation, installation.Name, 0)
+	require.NoError(t, err)
+
+	t.Run("data_values_enable_workflow_managed_docker", func(t *testing.T) {
+		// Critical settings for Docker daemon installation in workflow
+		assert.Contains(t, dataValues, "type: kubernetes-novolume") // Privileged mode uses kubernetes-novolume
+
+		// Should contain basic runner configuration
+		assert.Contains(t, dataValues, "githubConfigUrl: https://github.com/rkoster/rubionic-workspace")
+		assert.Contains(t, dataValues, "runnerScaleSetName: rubionic-workspace")
+		assert.Contains(t, dataValues, "minRunners: 1")
+		assert.Contains(t, dataValues, "maxRunners: 1")
+
+		// Should NOT have Docker socket mount (workflow installs Docker)
+		assert.NotContains(t, dataValues, "/var/run/docker.sock")
+	})
+
+	// Generate hook extension ConfigMap for privileged containers
+	hookExtension := manager.generateHookExtensionConfigMap(installation, installation.Name, 0)
+
+	t.Run("hook_extension_enables_docker_daemon", func(t *testing.T) {
+		// Security context required for Docker daemon installation
+		assert.Contains(t, hookExtension, "privileged: true")
+		assert.Contains(t, hookExtension, "runAsUser: 0")  // Root user
+		assert.Contains(t, hookExtension, "runAsGroup: 0") // Root group
+		assert.Contains(t, hookExtension, "fsGroup: 0")    // Root fs group
+		assert.Contains(t, hookExtension, "hostPID: true") // Host PID namespace
+		assert.Contains(t, hookExtension, "hostIPC: true") // Host IPC namespace
+
+		// Capabilities required for Docker daemon
+		assert.Contains(t, hookExtension, "SYS_ADMIN")  // Mount filesystems, cgroups
+		assert.Contains(t, hookExtension, "NET_ADMIN")  // Network configuration
+		assert.Contains(t, hookExtension, "SYS_PTRACE") // Process debugging
+
+		// Critical mounts for Docker daemon functionality
+		dockerRequiredMounts := []string{
+			"mountPath: /sys",           // sysfs for cgroup management
+			"mountPath: /proc",          // procfs for process management
+			"mountPath: /dev",           // device access
+			"mountPath: /dev/pts",       // pseudo-terminals
+			"mountPath: /dev/shm",       // shared memory
+			"mountPath: /sys/fs/cgroup", // cgroup filesystem
+		}
+
+		for _, mount := range dockerRequiredMounts {
+			assert.Contains(t, hookExtension, mount,
+				"Missing mount %s required for Docker daemon", mount)
+		}
+
+		// Host paths for Docker daemon access
+		dockerRequiredHostPaths := []string{
+			"path: /sys",
+			"path: /proc",
+			"path: /dev",
+			"path: /dev/pts",
+			"path: /dev/shm",
+			"path: /sys/fs/cgroup",
+		}
+
+		for _, hostPath := range dockerRequiredHostPaths {
+			assert.Contains(t, hookExtension, hostPath,
+				"Missing host path %s required for Docker daemon", hostPath)
+		}
+
+		// Verify directory types for mounts
+		assert.Contains(t, hookExtension, "type: Directory")
+
+		// Should NOT contain Docker socket (workflow manages Docker)
+		assert.NotContains(t, hookExtension, "/var/run/docker.sock")
+		assert.NotContains(t, hookExtension, "type: Socket")
+	})
+}
+
+// TestDockerCachePersistenceTemplates validates Docker image cache configuration
+// by testing the full template processing pipeline (via pkg/templates)
+func TestDockerCachePersistenceTemplates(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected string
+		name            string
+		cachePath       types.CachePath
+		wantContains    []string
+		wantNotContains []string
 	}{
 		{
-			name:     "Replace composite names correctly",
-			input:    "name: arc-runner-gha-rs-github-secret",
-			expected: "name: #@ data.values.installation.name + \"-gha-rs-github-secret\"",
+			name: "persistent_docker_cache_with_host_path",
+			cachePath: types.CachePath{
+				Source: "/nvme/docker-images",
+				Target: "/var/lib/docker",
+			},
+			wantContains: []string{
+				// Cache should be mounted in runner container
+				"mountPath: /var/lib/docker",
+				// Should use hostPath volume
+				"path: /nvme/docker-images",
+				"type: DirectoryOrCreate",
+			},
+			wantNotContains: []string{
+				// Should NOT be emptyDir
+				"emptyDir: {}",
+			},
 		},
 		{
-			name:     "Replace no-permission service account",
-			input:    "serviceAccountName: arc-runner-gha-rs-no-permission",
-			expected: "serviceAccountName: #@ data.values.installation.name + \"-gha-rs-no-permission\"",
-		},
-		{
-			name:     "Replace manager role names",
-			input:    "name: arc-runner-gha-rs-manager",
-			expected: "name: #@ data.values.installation.name + \"-gha-rs-manager\"",
-		},
-		{
-			name:     "Replace simple arc-runner references in labels",
-			input:    "app.kubernetes.io/name: arc-runner",
-			expected: "app.kubernetes.io/name: #@ data.values.installation.name",
-		},
-		{
-			name:     "Replace repository URL",
-			input:    "githubConfigUrl: https://github.com/example/repo",
-			expected: "githubConfigUrl: #@ data.values.installation.repository",
-		},
-		{
-			name:     "Don't break when arc-runner appears in composite names",
-			input:    "cleanup-github-secret-name: arc-runner-gha-rs-github-secret",
-			expected: "cleanup-github-secret-name: #@ data.values.installation.name + \"-gha-rs-github-secret\"",
-		},
-		{
-			name: "Multiple replacements in same content",
-			input: `name: arc-runner-gha-rs-github-secret
-labels:
-  app.kubernetes.io/name: arc-runner
-  actions.github.com/cleanup-github-secret-name: arc-runner-gha-rs-github-secret`,
-			expected: `name: #@ data.values.installation.name + "-gha-rs-github-secret"
-labels:
-  app.kubernetes.io/name: #@ data.values.installation.name
-  actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"`,
+			name: "temporary_docker_cache_with_empty_dir",
+			cachePath: types.CachePath{
+				Source: "", // Empty source = emptyDir
+				Target: "/var/lib/docker",
+			},
+			wantContains: []string{
+				// Cache should be mounted
+				"mountPath: /var/lib/docker",
+				// Should use emptyDir for empty source
+				"emptyDir: {}",
+			},
+			wantNotContains: []string{
+				// Should NOT be hostPath
+				"/nvme/",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := applyStringReplacements(tt.input)
-			assert.Equal(t, tt.expected, result)
+			processor := templates.NewProcessor()
 
-			// Ensure no invalid ytt syntax like "name-gha-rs-secret"
-			assert.NotContains(t, result, "data.values.installation.name-gha")
-			assert.NotContains(t, result, "name-gha-rs")
-		})
-	}
-}
+			installation := &types.RunnerInstallation{
+				Name:          "docker-workflow",
+				Repository:    "https://github.com/test/repo",
+				AuthValue:     "test-token",
+				ContainerMode: types.ContainerModePrivileged,
+				CachePaths:    []types.CachePath{tt.cachePath},
+			}
 
-// Helper function that extracts the string replacement logic for testing
-func applyStringReplacements(scaleSetYAML string) string {
-	// Same logic as in setupYttTemplateDir
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "https://github.com/example/repo", "#@ data.values.installation.repository")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-github-secret", "#@ data.values.installation.name + \"-gha-rs-github-secret\"")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-no-permission", "#@ data.values.installation.name + \"-gha-rs-no-permission\"")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-manager", "#@ data.values.installation.name + \"-gha-rs-manager\"")
-	// Replace remaining arc-runner references (labels, names, etc.)
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "\"arc-runner\"", "#@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, ": arc-runner", ": #@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "name: arc-runner", "name: #@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "placeholder", "#@ data.values.installation.authValue")
+			config := templates.Config{
+				Installation: installation,
+				InstanceName: installation.Name,
+				InstanceNum:  0,
+			}
 
-	return scaleSetYAML
-}
+			result, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+			require.NoError(t, err)
 
-// Test the data values file creation
-func TestCreateDataValuesFile(t *testing.T) {
-	manager := &Manager{}
+			resultStr := string(result)
 
-	installation := &types.RunnerInstallation{
-		Name:          "test-runner",
-		Repository:    "https://github.com/test/repo",
-		AuthValue:     "test-token",
-		ContainerMode: types.ContainerModePrivileged,
-		MinRunners:    1,
-		MaxRunners:    3,
-		CachePaths: []types.CachePath{
-			{Target: "/nix/store", Source: "/nix/store"},
-			{Target: "/var/lib/docker", Source: "/tmp/test-cache"},
-		},
-	}
+			for _, want := range tt.wantContains {
+				assert.Contains(t, resultStr, want,
+					"Docker cache template missing: %s", want)
+			}
 
-	tmpDir := t.TempDir()
-	dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-
-	err := manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-	require.NoError(t, err)
-
-	// Read the generated file
-	content, err := os.ReadFile(dataValuesPath)
-	require.NoError(t, err)
-
-	// Check that it contains expected values
-	contentStr := string(content)
-	assert.Contains(t, contentStr, "name: test-runner")
-	assert.Contains(t, contentStr, "repository: https://github.com/test/repo")
-	assert.Contains(t, contentStr, "authValue: test-token")
-	assert.Contains(t, contentStr, "containerMode: cached-privileged-kubernetes")
-	assert.Contains(t, contentStr, "minRunners: 1")
-	assert.Contains(t, contentStr, "maxRunners: 3")
-	assert.Contains(t, contentStr, "target: /nix/store")
-	assert.Contains(t, contentStr, "source: /nix/store")
-	assert.Contains(t, contentStr, "target: /var/lib/docker")
-	assert.Contains(t, contentStr, "source: /tmp/test-cache")
-}
-
-// Test setupYttTemplateDir function
-func TestSetupYttTemplateDir(t *testing.T) {
-	manager := &Manager{}
-
-	installation := &types.RunnerInstallation{
-		Name:          "test-runner",
-		Repository:    "https://github.com/test/repo",
-		AuthValue:     "test-token",
-		ContainerMode: types.ContainerModePrivileged,
-		CachePaths: []types.CachePath{
-			{Target: "/nix/store", Source: "/nix/store"},
-		},
-	}
-
-	tmpDir := t.TempDir()
-
-	templateDir, err := manager.setupYttTemplateDir(installation, tmpDir)
-	require.NoError(t, err)
-
-	// Check that template directory was created
-	assert.DirExists(t, templateDir)
-
-	// Check that scale-set.yaml exists and has correct replacements
-	scaleSetPath := filepath.Join(templateDir, "scale-set.yaml")
-	assert.FileExists(t, scaleSetPath)
-
-	content, err := os.ReadFile(scaleSetPath)
-	require.NoError(t, err)
-	contentStr := string(content)
-
-	// Ensure proper ytt syntax - no broken replacements
-	assert.NotContains(t, contentStr, "data.values.installation.name-gha-rs")
-	assert.NotContains(t, contentStr, "name-gha-rs-github-secret")
-
-	// Check for correct replacements
-	if strings.Contains(contentStr, "github-secret") {
-		assert.Contains(t, contentStr, "#@ data.values.installation.name + \"-gha-rs-github-secret\"")
-	}
-
-	// Check that overlay.yaml exists
-	overlayPath := filepath.Join(templateDir, "overlay.yaml")
-	assert.FileExists(t, overlayPath)
-}
-
-// Test that ytt expressions are syntactically valid
-func TestYttSyntaxValidation(t *testing.T) {
-	testCases := []struct {
-		name    string
-		input   string
-		isValid bool
-	}{
-		{
-			name:    "Valid concatenation",
-			input:   "#@ data.values.installation.name + \"-gha-rs-github-secret\"",
-			isValid: true,
-		},
-		{
-			name:    "Invalid syntax with dash",
-			input:   "#@ data.values.installation.name-gha-rs-github-secret",
-			isValid: false,
-		},
-		{
-			name:    "Valid simple reference",
-			input:   "#@ data.values.installation.name",
-			isValid: true,
-		},
-		{
-			name:    "Valid repository reference",
-			input:   "#@ data.values.installation.repository",
-			isValid: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Check basic syntax patterns
-			if tc.isValid {
-				// Valid ytt expressions should have proper structure
-				if strings.Contains(tc.input, "+") {
-					// Concatenation should have quotes around string literals
-					assert.Contains(t, tc.input, "\"-")
-				}
-				// Should start with #@ and reference data.values
-				assert.True(t, strings.HasPrefix(tc.input, "#@ data.values."))
-			} else {
-				// Invalid syntax - should not have unquoted dashes after variable names
-				if strings.Contains(tc.input, "data.values.installation.name-") {
-					assert.NotContains(t, tc.input, "+ \"-") // Missing concatenation operator
-				}
+			for _, notWant := range tt.wantNotContains {
+				assert.NotContains(t, resultStr, notWant,
+					"Docker cache template should not contain: %s", notWant)
 			}
 		})
 	}
 }
 
-// Test overlay file structure and syntax
-func TestOverlayFileSyntax(t *testing.T) {
+// TestMultiInstanceDockerCapabilities validates that all instances in multi-instance
+// deployments have consistent Docker daemon capabilities
+func TestMultiInstanceDockerCapabilities(t *testing.T) {
 	manager := &Manager{}
-	tmpDir := t.TempDir()
 
 	installation := &types.RunnerInstallation{
+		Name:          "rubionic-workspace",
+		Repository:    "https://github.com/rkoster/rubionic-workspace",
+		AuthValue:     "test-token",
 		ContainerMode: types.ContainerModePrivileged,
+		Instances:     3,
 		CachePaths: []types.CachePath{
-			{Target: "/nix/store", Source: "/nix/store"},
+			{Source: "/nix/store", Target: "/nix/store-host"},
+			{Source: "/nvme/docker-cache", Target: "/var/lib/docker"},
 		},
 	}
 
-	templateDir, err := manager.setupYttTemplateDir(installation, tmpDir)
-	require.NoError(t, err)
+	// Test all instances have identical Docker capabilities
+	for i := 1; i <= installation.Instances; i++ {
+		instanceName := installation.Name + "-" + string(rune('0'+i))
 
-	overlayPath := filepath.Join(templateDir, "overlay.yaml")
-	content, err := os.ReadFile(overlayPath)
-	require.NoError(t, err)
+		t.Run("instance_"+instanceName, func(t *testing.T) {
+			hookExtension := manager.generateHookExtensionConfigMap(installation, instanceName, i)
 
-	contentStr := string(content)
+			// Each instance must support Docker daemon installation
+			dockerRequirements := []string{
+				"privileged: true",
+				"SYS_ADMIN",
+				"NET_ADMIN",
+				"SYS_PTRACE",
+				"hostPID: true",
+				"hostIPC: true",
+				"mountPath: /sys",
+				"mountPath: /proc",
+				"mountPath: /dev",
+			}
 
-	// Check overlay structure
-	assert.Contains(t, contentStr, "#@ load(\"@ytt:data\", \"data\")")
-	assert.Contains(t, contentStr, "#@ load(\"@ytt:overlay\", \"overlay\")")
-	assert.Contains(t, contentStr, "#@overlay/match")
+			for _, req := range dockerRequirements {
+				assert.Contains(t, hookExtension, req,
+					"Instance %s missing Docker requirement: %s", instanceName, req)
+			}
 
-	// Ensure proper ytt syntax in overlays
-	assert.Contains(t, contentStr, "#@ data.values.installation.name + \"-gha-rs")
-	assert.NotContains(t, contentStr, "data.values.installation.name-gha") // No broken syntax
+			// Verify instance-specific naming in ConfigMap
+			expectedConfigMapName := "privileged-hook-extension-" + instanceName
+			assert.Contains(t, hookExtension, expectedConfigMapName)
+		})
+	}
 }

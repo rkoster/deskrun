@@ -2,37 +2,22 @@ package runner
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/rkoster/deskrun/arcembedded"
-	"github.com/rkoster/deskrun/internal/kapp"
+	"github.com/rkoster/deskrun/pkg/templates"
 	"github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
 )
 
 var _ = Describe("ytt Overlay Processing", func() {
 	var (
-		manager    *Manager
-		tmpDir     string
-		kappClient *kapp.Client
+		processor *templates.Processor
 	)
 
 	BeforeEach(func() {
-		var err error
-		manager = &Manager{}
-		tmpDir, err = os.MkdirTemp("/tmp", "overlay-test-*")
-		Expect(err).NotTo(HaveOccurred())
-		kappClient = kapp.NewClient("test", "test-namespace")
-	})
-
-	AfterEach(func() {
-		if tmpDir != "" {
-			os.RemoveAll(tmpDir)
-		}
+		processor = templates.NewProcessor()
 	})
 
 	Describe("Container Mode Configurations", func() {
@@ -55,46 +40,24 @@ var _ = Describe("ytt Overlay Processing", func() {
 				baseInstallation.ContainerMode = types.ContainerModeKubernetes
 			})
 
-			It("should generate correct ytt data values for kubernetes mode", func() {
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-				err := manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Read the generated data values
-				dataValuesContent, err := os.ReadFile(dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-				dataValuesString := string(dataValuesContent)
-
-				Expect(dataValuesString).To(ContainSubstring("containerMode: kubernetes"))
-				Expect(dataValuesString).To(ContainSubstring("cachePaths: []"))
-				Expect(dataValuesString).To(ContainSubstring("installation:"))
-				Expect(dataValuesString).NotTo(ContainSubstring("source:"))
-				Expect(dataValuesString).NotTo(ContainSubstring("target:"))
-			})
-
 			It("should apply kubernetes-specific overlay transformations", func() {
-				// Setup template directory
-				templateDir, err := manager.setupYttTemplateDir(baseInstallation, tmpDir)
-				Expect(err).NotTo(HaveOccurred())
+				config := templates.Config{
+					Installation: baseInstallation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
+				}
 
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-				err = manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Process with ytt
-				processedYAML, err := kappClient.ProcessTemplate(templateDir, dataValuesPath)
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(processedYAML).NotTo(BeEmpty())
 
 				// Parse the YAML to verify kubernetes-specific configurations
 				var resources []map[string]interface{}
-				decoder := yaml.NewDecoder(strings.NewReader(processedYAML))
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
 				for {
 					var resource map[string]interface{}
 					if err := decoder.Decode(&resource); err != nil {
-						break // EOF or end of documents
+						break
 					}
 					if resource != nil {
 						resources = append(resources, resource)
@@ -145,40 +108,20 @@ var _ = Describe("ytt Overlay Processing", func() {
 				baseInstallation.ContainerMode = types.ContainerModeDinD
 			})
 
-			It("should generate correct ytt data values for dind mode", func() {
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-				err := manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Read the generated data values
-				dataValuesContent, err := os.ReadFile(dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-				dataValuesString := string(dataValuesContent)
-
-				Expect(dataValuesString).To(ContainSubstring("containerMode: dind"))
-				Expect(dataValuesString).To(ContainSubstring("cachePaths: []"))
-				Expect(dataValuesString).To(ContainSubstring("installation:"))
-			})
-
 			It("should apply dind-specific overlay transformations", func() {
-				// Setup template directory
-				templateDir, err := manager.setupYttTemplateDir(baseInstallation, tmpDir)
-				Expect(err).NotTo(HaveOccurred())
+				config := templates.Config{
+					Installation: baseInstallation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
+				}
 
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-				err = manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Process with ytt
-				processedYAML, err := kappClient.ProcessTemplate(templateDir, dataValuesPath)
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(processedYAML).NotTo(BeEmpty())
 
 				// Parse the YAML to verify dind-specific configurations
 				var resources []map[string]interface{}
-				decoder := yaml.NewDecoder(strings.NewReader(processedYAML))
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
 				for {
 					var resource map[string]interface{}
 					if err := decoder.Decode(&resource); err != nil {
@@ -264,46 +207,20 @@ var _ = Describe("ytt Overlay Processing", func() {
 				}
 			})
 
-			It("should generate correct ytt data values for privileged mode", func() {
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-				err := manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Read the generated data values
-				dataValuesContent, err := os.ReadFile(dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-				dataValuesString := string(dataValuesContent)
-
-				Expect(dataValuesString).To(ContainSubstring("containerMode: cached-privileged-kubernetes"))
-				Expect(dataValuesString).To(ContainSubstring("cachePaths:"))
-				Expect(dataValuesString).To(ContainSubstring("installation:"))
-				Expect(dataValuesString).To(ContainSubstring("- source: /nix/store"))
-				Expect(dataValuesString).To(ContainSubstring("target: /nix/store-host"))
-				Expect(dataValuesString).To(ContainSubstring("- source: /nix/var/nix/daemon-socket"))
-				Expect(dataValuesString).To(ContainSubstring("target: /nix/var/nix/daemon-socket-host"))
-				Expect(dataValuesString).To(ContainSubstring(`- source: ""`))
-				Expect(dataValuesString).To(ContainSubstring("target: /var/lib/docker"))
-			})
-
 			It("should apply privileged-specific overlay transformations", func() {
-				// Setup template directory
-				templateDir, err := manager.setupYttTemplateDir(baseInstallation, tmpDir)
-				Expect(err).NotTo(HaveOccurred())
+				config := templates.Config{
+					Installation: baseInstallation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
+				}
 
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-				err = manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Process with ytt
-				processedYAML, err := kappClient.ProcessTemplate(templateDir, dataValuesPath)
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(processedYAML).NotTo(BeEmpty())
 
 				// Parse the YAML
 				var resources []map[string]interface{}
-				decoder := yaml.NewDecoder(strings.NewReader(processedYAML))
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
 				for {
 					var resource map[string]interface{}
 					if err := decoder.Decode(&resource); err != nil {
@@ -336,11 +253,13 @@ var _ = Describe("ytt Overlay Processing", func() {
 				runnerContainer := containers[0].(map[string]interface{})
 				Expect(runnerContainer["name"]).To(Equal("runner"))
 
-				// Verify runner container security context
+				// Verify runner container security context (privileged)
 				runnerSecurityContext := runnerContainer["securityContext"].(map[string]interface{})
 				Expect(runnerSecurityContext["privileged"]).To(BeTrue())
+				Expect(runnerSecurityContext["allowPrivilegeEscalation"]).To(BeTrue())
+				Expect(runnerSecurityContext["runAsNonRoot"]).To(BeFalse())
 
-				// Verify privileged-specific environment variables
+				// Verify privileged environment variables
 				env := runnerContainer["env"].([]interface{})
 				expectedEnvVars := map[string]string{
 					"ACTIONS_RUNNER_CONTAINER_HOOKS":         "/home/runner/k8s-novolume/index.js",
@@ -361,10 +280,9 @@ var _ = Describe("ytt Overlay Processing", func() {
 					Expect(found).To(BeTrue(), fmt.Sprintf("Should have environment variable %s", expectedName))
 				}
 
-				// Verify volume mounts including cache paths
+				// Verify volume mounts
 				volumeMounts := runnerContainer["volumeMounts"].([]interface{})
 				expectedMounts := map[string]string{
-					"docker-socket":  "/var/run/docker.sock",
 					"hook-extension": "/etc/hooks",
 					"cache-0":        "/nix/store-host",
 					"cache-1":        "/nix/var/nix/daemon-socket-host",
@@ -384,14 +302,13 @@ var _ = Describe("ytt Overlay Processing", func() {
 					Expect(found).To(BeTrue(), fmt.Sprintf("Should have volume mount %s at %s", expectedName, expectedPath))
 				}
 
-				// Verify volumes including cache paths
+				// Verify volumes
 				volumes := podSpec["volumes"].([]interface{})
 				expectedVolumes := map[string]string{
-					"docker-socket":  "hostPath",
 					"hook-extension": "configMap",
 					"cache-0":        "hostPath",
 					"cache-1":        "hostPath",
-					"cache-2":        "hostPath",
+					"cache-2":        "emptyDir",
 				}
 
 				for expectedName, expectedType := range expectedVolumes {
@@ -410,260 +327,339 @@ var _ = Describe("ytt Overlay Processing", func() {
 			})
 
 			It("should handle cache paths with empty source correctly", func() {
-				// This test verifies that empty source paths are handled correctly
-				templateDir, err := manager.setupYttTemplateDir(baseInstallation, tmpDir)
-				Expect(err).NotTo(HaveOccurred())
-
-				dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-				err = manager.createDataValuesFile(baseInstallation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				processedYAML, err := kappClient.ProcessTemplate(templateDir, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Verify that the empty source path is preserved in the output
-				Expect(processedYAML).To(ContainSubstring(`path: ""`))
-				Expect(processedYAML).To(ContainSubstring("type: DirectoryOrCreate"))
-			})
-		})
-	})
-
-	Describe("Data Values Generation", func() {
-		It("should generate valid YAML for all container modes", func() {
-			installation := &types.RunnerInstallation{
-				Name:       "test-runner",
-				Repository: "https://github.com/owner/repo",
-				AuthType:   types.AuthTypePAT,
-				AuthValue:  "test-token",
-				MinRunners: 1,
-				MaxRunners: 3,
-				Instances:  1,
-			}
-
-			containerModes := []types.ContainerMode{
-				types.ContainerModeKubernetes,
-				types.ContainerModeDinD,
-				types.ContainerModePrivileged,
-			}
-
-			for _, mode := range containerModes {
-				installation.ContainerMode = mode
-				if mode == types.ContainerModePrivileged {
-					installation.CachePaths = []types.CachePath{
-						{Source: "/test/source", Target: "/test/target"},
-					}
-				} else {
-					installation.CachePaths = nil
+				config := templates.Config{
+					Installation: baseInstallation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
 				}
 
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, fmt.Sprintf("test-data-values-%s.yaml", mode))
-				err := manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-				Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Failed for mode %s", mode))
-
-				// Read and verify the generated data values
-				dataValuesContent, err := os.ReadFile(dataValuesPath)
-				Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Failed to read data values for mode %s", mode))
-				dataValuesString := string(dataValuesContent)
-
-				// Verify it's valid YAML
-				var parsed map[string]interface{}
-				err = yaml.Unmarshal([]byte(dataValuesString), &parsed)
-				Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Invalid YAML for mode %s: %s", mode, dataValuesString))
-
-				// Verify required fields are present
-				installation := parsed["installation"].(map[string]interface{})
-				Expect(installation["containerMode"]).To(Equal(string(mode)))
-				Expect(installation["name"]).To(Equal("test-runner"))
-				Expect(installation["repository"]).To(Equal("https://github.com/owner/repo"))
-			}
-		})
-
-		It("should handle special characters in repository URLs", func() {
-			installation := &types.RunnerInstallation{
-				Name:          "test-runner",
-				Repository:    "https://github.com/owner/repo-with-dashes_and_underscores",
-				ContainerMode: types.ContainerModeKubernetes,
-				AuthType:      types.AuthTypePAT,
-				AuthValue:     "test-token",
-				MinRunners:    1,
-				MaxRunners:    3,
-				Instances:     1,
-			}
-
-			// Create data values file
-			dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-			err := manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Read the generated data values
-			dataValuesContent, err := os.ReadFile(dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
-			dataValuesString := string(dataValuesContent)
-
-			Expect(dataValuesString).To(ContainSubstring("repository: https://github.com/owner/repo-with-dashes_and_underscores"))
-		})
-
-		It("should handle instance numbers correctly", func() {
-			installation := &types.RunnerInstallation{
-				Name:          "test-runner",
-				Repository:    "https://github.com/owner/repo",
-				ContainerMode: types.ContainerModeKubernetes,
-				AuthType:      types.AuthTypePAT,
-				AuthValue:     "test-token",
-				MinRunners:    1,
-				MaxRunners:    3,
-				Instances:     5,
-			}
-
-			for instanceNum := 1; instanceNum <= 5; instanceNum++ {
-				instanceName := fmt.Sprintf("test-runner-%d", instanceNum)
-
-				// Create data values file
-				dataValuesPath := filepath.Join(tmpDir, fmt.Sprintf("test-data-values-%d.yaml", instanceNum))
-				err := manager.createDataValuesFile(installation, instanceName, instanceNum, dataValuesPath)
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 				Expect(err).NotTo(HaveOccurred())
 
-				// Read the generated data values
-				dataValuesContent, err := os.ReadFile(dataValuesPath)
+				processedStr := string(processedYAML)
+				Expect(processedStr).To(ContainSubstring("privileged: true"))
+				Expect(processedStr).To(ContainSubstring("k8s-novolume/index.js"))
+			})
+		})
+
+		Describe("Template Validation", func() {
+			It("should generate valid output for all container modes", func() {
+				installation := &types.RunnerInstallation{
+					Name:       "test-runner",
+					Repository: "https://github.com/owner/repo",
+					AuthType:   types.AuthTypePAT,
+					AuthValue:  "test-token",
+					MinRunners: 1,
+					MaxRunners: 3,
+					Instances:  1,
+				}
+
+				containerModes := []types.ContainerMode{
+					types.ContainerModeKubernetes,
+					types.ContainerModeDinD,
+					types.ContainerModePrivileged,
+				}
+
+				for _, mode := range containerModes {
+					installation.ContainerMode = mode
+					if mode == types.ContainerModePrivileged {
+						installation.CachePaths = []types.CachePath{
+							{Source: "/test/source", Target: "/test/target"},
+						}
+					} else {
+						installation.CachePaths = nil
+					}
+
+					config := templates.Config{
+						Installation: installation,
+						InstanceName: "test-runner",
+						InstanceNum:  0,
+					}
+
+					processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+					Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Failed for mode %s", mode))
+
+					// Verify it's valid YAML
+					var parsed map[string]interface{}
+					err = yaml.Unmarshal(processedYAML, &parsed)
+					Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Invalid YAML for mode %s", mode))
+				}
+			})
+
+			It("should handle special characters in repository URLs", func() {
+				installation := &types.RunnerInstallation{
+					Name:          "test-runner",
+					Repository:    "https://github.com/owner/repo-with-dashes_and_underscores",
+					ContainerMode: types.ContainerModeKubernetes,
+					AuthType:      types.AuthTypePAT,
+					AuthValue:     "test-token",
+					MinRunners:    1,
+					MaxRunners:    3,
+					Instances:     1,
+				}
+
+				config := templates.Config{
+					Installation: installation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
+				}
+
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 				Expect(err).NotTo(HaveOccurred())
-				dataValuesString := string(dataValuesContent)
 
-				Expect(dataValuesString).To(ContainSubstring(fmt.Sprintf("name: %s", instanceName)))
-				Expect(dataValuesString).To(ContainSubstring(fmt.Sprintf("instanceNum: %d", instanceNum)))
-			}
-		})
-	})
-
-	Describe("Template Setup", func() {
-		It("should create template directory structure correctly", func() {
-			installation := &types.RunnerInstallation{
-				Name:          "test-runner",
-				Repository:    "https://github.com/owner/repo",
-				ContainerMode: types.ContainerModeKubernetes,
-				AuthType:      types.AuthTypePAT,
-				AuthValue:     "test-token",
-			}
-
-			templateDir, err := manager.setupYttTemplateDir(installation, tmpDir)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Verify template directory exists
-			Expect(templateDir).To(BeADirectory())
-
-			// Verify required files exist
-			scaleSetPath := filepath.Join(templateDir, "scale-set.yaml")
-			overlayPath := filepath.Join(templateDir, "overlay.yaml")
-
-			Expect(scaleSetPath).To(BeARegularFile())
-			Expect(overlayPath).To(BeARegularFile())
-
-			// Verify scale-set template contains ytt data value expressions
-			scaleSetContent, err := os.ReadFile(scaleSetPath)
-			Expect(err).NotTo(HaveOccurred())
-			scaleSetString := string(scaleSetContent)
-
-			Expect(scaleSetString).To(ContainSubstring("#@ data.values.installation.repository"))
-			Expect(scaleSetString).To(ContainSubstring("#@ data.values.installation.name"))
-			Expect(scaleSetString).To(ContainSubstring("#@ data.values.installation.authValue"))
-
-			// Verify overlay contains ytt overlay directives
-			overlayContent, err := os.ReadFile(overlayPath)
-			Expect(err).NotTo(HaveOccurred())
-			overlayString := string(overlayContent)
-
-			Expect(overlayString).To(ContainSubstring("#@ load(\"@ytt:data\", \"data\")"))
-			Expect(overlayString).To(ContainSubstring("#@ load(\"@ytt:overlay\", \"overlay\")"))
-			Expect(overlayString).To(ContainSubstring("#@ if data.values.installation.containerMode"))
+				Expect(string(processedYAML)).To(ContainSubstring("https://github.com/owner/repo-with-dashes_and_underscores"))
+			})
 		})
 
-		It("should read overlay content from embedded files", func() {
-			overlayContent, err := arcembedded.GetUniversalOverlay()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(overlayContent).NotTo(BeEmpty())
+		Describe("Edge Cases", func() {
+			It("should handle empty cache paths array", func() {
+				installation := &types.RunnerInstallation{
+					Name:          "test-runner",
+					Repository:    "https://github.com/owner/repo",
+					ContainerMode: types.ContainerModePrivileged,
+					AuthType:      types.AuthTypePAT,
+					AuthValue:     "test-token",
+					CachePaths:    []types.CachePath{},
+				}
 
-			// Verify it contains expected ytt directives
-			Expect(overlayContent).To(ContainSubstring("@ytt:overlay"))
-			Expect(overlayContent).To(ContainSubstring("containerMode"))
-			Expect(overlayContent).To(ContainSubstring("kubernetes"))
-			Expect(overlayContent).To(ContainSubstring("dind"))
-			Expect(overlayContent).To(ContainSubstring("cached-privileged-kubernetes"))
-		})
-	})
+				config := templates.Config{
+					Installation: installation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
+				}
 
-	Describe("Edge Cases", func() {
-		It("should handle empty cache paths array", func() {
-			installation := &types.RunnerInstallation{
-				Name:          "test-runner",
-				Repository:    "https://github.com/owner/repo",
-				ContainerMode: types.ContainerModePrivileged,
-				AuthType:      types.AuthTypePAT,
-				AuthValue:     "test-token",
-				CachePaths:    []types.CachePath{}, // Empty array
-			}
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(processedYAML).NotTo(BeEmpty())
+			})
 
-			// Create data values file
-			dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-			err := manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
+			It("should handle nil cache paths", func() {
+				installation := &types.RunnerInstallation{
+					Name:          "test-runner",
+					Repository:    "https://github.com/owner/repo",
+					ContainerMode: types.ContainerModePrivileged,
+					AuthType:      types.AuthTypePAT,
+					AuthValue:     "test-token",
+					CachePaths:    nil,
+				}
 
-			// Read the generated data values
-			dataValuesContent, err := os.ReadFile(dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
-			dataValuesString := string(dataValuesContent)
+				config := templates.Config{
+					Installation: installation,
+					InstanceName: "test-runner",
+					InstanceNum:  0,
+				}
 
-			Expect(dataValuesString).To(ContainSubstring("cachePaths: []"))
-		})
-
-		It("should handle nil cache paths", func() {
-			installation := &types.RunnerInstallation{
-				Name:          "test-runner",
-				Repository:    "https://github.com/owner/repo",
-				ContainerMode: types.ContainerModePrivileged,
-				AuthType:      types.AuthTypePAT,
-				AuthValue:     "test-token",
-				CachePaths:    nil, // nil slice
-			}
-
-			// Create data values file
-			dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-			err := manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Read the generated data values
-			dataValuesContent, err := os.ReadFile(dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
-			dataValuesString := string(dataValuesContent)
-
-			Expect(dataValuesString).To(ContainSubstring("cachePaths: []"))
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(processedYAML).NotTo(BeEmpty())
+			})
 		})
 
-		It("should escape special YAML characters in auth values", func() {
-			installation := &types.RunnerInstallation{
-				Name:          "test-runner",
-				Repository:    "https://github.com/owner/repo",
-				ContainerMode: types.ContainerModeKubernetes,
-				AuthType:      types.AuthTypePAT,
-				AuthValue:     "token:with:colons@and#special!chars",
-			}
+		Describe("Environment Variable Configuration", func() {
+			BeforeEach(func() {
+				baseInstallation = &types.RunnerInstallation{
+					Name:          "test-env-runner",
+					Repository:    "https://github.com/test/repo",
+					AuthType:      types.AuthTypePAT,
+					AuthValue:     "test-token",
+					ContainerMode: types.ContainerModePrivileged,
+					CachePaths:    []types.CachePath{{Source: "/test", Target: "/test"}},
+					MinRunners:    1,
+					MaxRunners:    3,
+				}
+			})
 
-			// Create data values file
-			dataValuesPath := filepath.Join(tmpDir, "test-data-values.yaml")
-			err := manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
+			It("should set ACTIONS_RUNNER_POD_NAME for cached-privileged-kubernetes mode", func() {
+				config := templates.Config{
+					Installation: baseInstallation,
+					InstanceName: "test-podname",
+					InstanceNum:  0,
+				}
 
-			// Read the generated data values
-			dataValuesContent, err := os.ReadFile(dataValuesPath)
-			Expect(err).NotTo(HaveOccurred())
-			dataValuesString := string(dataValuesContent)
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+				Expect(err).NotTo(HaveOccurred())
 
-			// Verify it's still valid YAML
-			var parsed map[string]interface{}
-			err = yaml.Unmarshal([]byte(dataValuesString), &parsed)
-			Expect(err).NotTo(HaveOccurred())
+				var resources []map[string]interface{}
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
+				for {
+					var resource map[string]interface{}
+					if err := decoder.Decode(&resource); err != nil {
+						break
+					}
+					if resource != nil {
+						resources = append(resources, resource)
+					}
+				}
 
-			installationData := parsed["installation"].(map[string]interface{})
-			Expect(installationData["authValue"]).To(Equal("token:with:colons@and#special!chars"))
+				var autoscalingRunnerSet map[string]interface{}
+				for _, resource := range resources {
+					if resource["kind"] == "AutoscalingRunnerSet" {
+						autoscalingRunnerSet = resource
+						break
+					}
+				}
+				Expect(autoscalingRunnerSet).NotTo(BeNil())
+
+				spec := autoscalingRunnerSet["spec"].(map[string]interface{})
+				template := spec["template"].(map[string]interface{})
+				podSpec := template["spec"].(map[string]interface{})
+				containers := podSpec["containers"].([]interface{})
+
+				runnerContainer := containers[0].(map[string]interface{})
+				env := runnerContainer["env"].([]interface{})
+
+				var podNameEnv map[string]interface{}
+				for _, envVar := range env {
+					envMap := envVar.(map[string]interface{})
+					if envMap["name"] == "ACTIONS_RUNNER_POD_NAME" {
+						podNameEnv = envMap
+						break
+					}
+				}
+
+				Expect(podNameEnv).NotTo(BeNil(), "ACTIONS_RUNNER_POD_NAME environment variable should be present")
+
+				valueFrom := podNameEnv["valueFrom"].(map[string]interface{})
+				fieldRef := valueFrom["fieldRef"].(map[string]interface{})
+				fieldPath := fieldRef["fieldPath"].(string)
+
+				Expect(fieldPath).To(Equal("metadata.name"), "ACTIONS_RUNNER_POD_NAME should use metadata.name fieldRef")
+			})
+
+			It("should not set ACTIONS_RUNNER_POD_NAME for non-cached-privileged-kubernetes modes", func() {
+				nonCachedModes := []types.ContainerMode{types.ContainerModeKubernetes, types.ContainerModeDinD}
+
+				for _, mode := range nonCachedModes {
+					installation := &types.RunnerInstallation{
+						Name:          "test-no-podname",
+						Repository:    "https://github.com/test/repo",
+						AuthType:      types.AuthTypePAT,
+						AuthValue:     "test-token",
+						ContainerMode: mode,
+						CachePaths:    []types.CachePath{},
+						MinRunners:    1,
+						MaxRunners:    3,
+					}
+
+					config := templates.Config{
+						Installation: installation,
+						InstanceName: "test-no-podname",
+						InstanceNum:  0,
+					}
+
+					processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+					Expect(err).NotTo(HaveOccurred())
+
+					var resources []map[string]interface{}
+					decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
+					for {
+						var resource map[string]interface{}
+						if err := decoder.Decode(&resource); err != nil {
+							break
+						}
+						if resource != nil {
+							resources = append(resources, resource)
+						}
+					}
+
+					var autoscalingRunnerSet map[string]interface{}
+					for _, resource := range resources {
+						if resource["kind"] == "AutoscalingRunnerSet" {
+							autoscalingRunnerSet = resource
+							break
+						}
+					}
+					Expect(autoscalingRunnerSet).NotTo(BeNil())
+
+					spec := autoscalingRunnerSet["spec"].(map[string]interface{})
+					template := spec["template"].(map[string]interface{})
+					podSpec := template["spec"].(map[string]interface{})
+					containers := podSpec["containers"].([]interface{})
+
+					runnerContainer := containers[0].(map[string]interface{})
+					env := runnerContainer["env"].([]interface{})
+
+					for _, envVar := range env {
+						envMap := envVar.(map[string]interface{})
+						Expect(envMap["name"]).NotTo(Equal("ACTIONS_RUNNER_POD_NAME"),
+							"ACTIONS_RUNNER_POD_NAME should not be present for mode: %s", mode)
+					}
+				}
+			})
+
+			It("should include all required hook environment variables for cached-privileged-kubernetes mode", func() {
+				config := templates.Config{
+					Installation: baseInstallation,
+					InstanceName: "test-hook-vars",
+					InstanceNum:  0,
+				}
+
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+				Expect(err).NotTo(HaveOccurred())
+
+				var resources []map[string]interface{}
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
+				for {
+					var resource map[string]interface{}
+					if err := decoder.Decode(&resource); err != nil {
+						break
+					}
+					if resource != nil {
+						resources = append(resources, resource)
+					}
+				}
+
+				var autoscalingRunnerSet map[string]interface{}
+				for _, resource := range resources {
+					if resource["kind"] == "AutoscalingRunnerSet" {
+						autoscalingRunnerSet = resource
+						break
+					}
+				}
+				Expect(autoscalingRunnerSet).NotTo(BeNil())
+
+				spec := autoscalingRunnerSet["spec"].(map[string]interface{})
+				template := spec["template"].(map[string]interface{})
+				podSpec := template["spec"].(map[string]interface{})
+				containers := podSpec["containers"].([]interface{})
+
+				runnerContainer := containers[0].(map[string]interface{})
+				env := runnerContainer["env"].([]interface{})
+
+				expectedEnvVars := map[string]string{
+					"ACTIONS_RUNNER_CONTAINER_HOOKS":         "/home/runner/k8s-novolume/index.js",
+					"ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE": "/etc/hooks/content",
+					"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER":   "false",
+				}
+
+				for expectedName, expectedValue := range expectedEnvVars {
+					found := false
+					for _, envVar := range env {
+						envMap := envVar.(map[string]interface{})
+						if envMap["name"] == expectedName {
+							found = true
+							Expect(envMap["value"]).To(Equal(expectedValue),
+								"Environment variable %s should have value %s", expectedName, expectedValue)
+							break
+						}
+					}
+					Expect(found).To(BeTrue(), "Environment variable %s should be present", expectedName)
+				}
+
+				var podNameEnvFound bool
+				for _, envVar := range env {
+					envMap := envVar.(map[string]interface{})
+					if envMap["name"] == "ACTIONS_RUNNER_POD_NAME" {
+						podNameEnvFound = true
+						valueFrom := envMap["valueFrom"].(map[string]interface{})
+						fieldRef := valueFrom["fieldRef"].(map[string]interface{})
+						fieldPath := fieldRef["fieldPath"].(string)
+						Expect(fieldPath).To(Equal("metadata.name"), "ACTIONS_RUNNER_POD_NAME should use metadata.name fieldRef")
+						break
+					}
+				}
+				Expect(podNameEnvFound).To(BeTrue(), "ACTIONS_RUNNER_POD_NAME should be present with fieldRef")
+			})
 		})
 	})
 })

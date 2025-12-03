@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/rkoster/deskrun/arcembedded"
 	"github.com/rkoster/deskrun/internal/cluster"
 	"github.com/rkoster/deskrun/internal/kapp"
+	"github.com/rkoster/deskrun/pkg/templates"
 	deskruntypes "github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -361,9 +363,9 @@ func (m *Manager) Install(ctx context.Context, installation *deskruntypes.Runner
 	return nil
 }
 
-// installInstance installs a single runner scale set instance using ytt processing
+// installInstance installs a single runner scale set instance using the unified template processing package
 func (m *Manager) installInstance(ctx context.Context, installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) error {
-	// Create temporary directory for templates and manifests
+	// Create temporary directory for manifests
 	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
@@ -383,32 +385,32 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 		}
 	}
 
-	// Setup ytt template processing
-	templateDir, err := m.setupYttTemplateDir(installation, tmpDir)
-	if err != nil {
-		return fmt.Errorf("failed to setup ytt template dir: %w", err)
+	// Use the unified template processing package (ytt Go library, no shell execution)
+	processor := templates.NewProcessor()
+	config := templates.Config{
+		Installation: installation,
+		InstanceName: instanceName,
+		InstanceNum:  instanceNum,
+		Namespace:    defaultNamespace,
 	}
 
-	// Create data values file for ytt
-	dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-	if err := m.createDataValuesFile(installation, instanceName, instanceNum, dataValuesPath); err != nil {
-		return fmt.Errorf("failed to create data values file: %w", err)
-	}
-
-	// Process templates with ytt
-	kappClient := m.getKappClient()
-	processedYAML, err := kappClient.ProcessTemplate(templateDir, dataValuesPath)
+	processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 	if err != nil {
-		return fmt.Errorf("failed to process template with ytt: %w", err)
+		// Check if it's a TemplateError with verbose information
+		if templateErr, ok := err.(*templates.TemplateError); ok {
+			return fmt.Errorf("failed to process template: %s", templateErr.VerboseError())
+		}
+		return fmt.Errorf("failed to process template: %w", err)
 	}
 
 	// Write processed YAML to file for kapp
 	manifestPath := filepath.Join(tmpDir, "manifest.yaml")
-	if err := os.WriteFile(manifestPath, []byte(processedYAML), 0644); err != nil {
+	if err := os.WriteFile(manifestPath, processedYAML, 0644); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 
 	// Deploy using kapp
+	kappClient := m.getKappClient()
 	appName := instanceName
 	if err := kappClient.Deploy(appName, manifestPath); err != nil {
 		return fmt.Errorf("failed to deploy with kapp: %w", err)
@@ -467,23 +469,91 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 
 // Status returns the status of a runner installation
 func (m *Manager) Status(ctx context.Context, name string) (string, error) {
-	// Get kapp app status
 	kappClient := m.getKappClient()
+
+	// First try single instance (name as-is)
 	inspectOutput, err := kappClient.Inspect(name)
-	if err != nil {
+	if err == nil {
+		// Single instance found
+		statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
+
+		arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, name)
+		if err != nil {
+			return statusStr + inspectOutput, nil
+		}
+
+		return fmt.Sprintf("%s\nKubernetes Resources:\n%s\n\nkapp Details:\n%s", statusStr, arsStatus, inspectOutput), nil
+	}
+
+	// Check if the error indicates the app doesn't exist
+	if !strings.Contains(err.Error(), "does not exist") {
+		// Some other error occurred
 		return "", fmt.Errorf("failed to get status: %w", err)
 	}
 
-	statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
-
-	// Also get the AutoscalingRunnerSet status
-	arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, name)
+	// Single instance not found, try to find multiple instances directly via ConfigMaps
+	// Kapp stores app state in ConfigMaps with the app name
+	clientset, err := m.getKubernetesClient()
 	if err != nil {
-		// Just show kapp status if getting ARS status fails
-		return statusStr + inspectOutput, nil
+		return "", fmt.Errorf("failed to get kubernetes client: %w", err)
 	}
 
-	return fmt.Sprintf("%s\nKubernetes Resources:\n%s\n\nkapp Details:\n%s", statusStr, arsStatus, inspectOutput), nil
+	configMaps, err := clientset.CoreV1().ConfigMaps(defaultNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list ConfigMaps: %w", err)
+	}
+
+	// Look for instances with pattern name-1, name-2, etc.
+	var instanceNames []string
+	for _, configMap := range configMaps.Items {
+		cmName := configMap.Name
+		// Skip change tracking ConfigMaps
+		if strings.Contains(cmName, "-change-") {
+			continue
+		}
+		// Check if it matches our pattern
+		if strings.HasPrefix(cmName, name+"-") {
+			// Check if suffix is a number
+			suffix := strings.TrimPrefix(cmName, name+"-")
+			if _, err := strconv.Atoi(suffix); err == nil {
+				instanceNames = append(instanceNames, cmName)
+			}
+		}
+	}
+
+	if len(instanceNames) == 0 {
+		return "", fmt.Errorf("failed to get status: kapp inspect failed: App '%s' (namespace: %s) does not exist", name, defaultNamespace)
+	}
+
+	// Sort instance names for consistent output
+	sort.Strings(instanceNames)
+
+	// Show status for all instances
+	var results []string
+	statusHeader := fmt.Sprintf("NAME: %s (Multi-instance)\nNAMESPACE: %s\nMANAGED BY: kapp\nINSTANCES: %d\n",
+		name, defaultNamespace, len(instanceNames))
+
+	for _, instanceName := range instanceNames {
+		results = append(results, fmt.Sprintf("=== Instance: %s ===", instanceName))
+
+		inspectOutput, err := kappClient.Inspect(instanceName)
+		if err != nil {
+			results = append(results, fmt.Sprintf("Error inspecting %s: %v", instanceName, err))
+			continue
+		}
+
+		arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, instanceName)
+		if err != nil {
+			results = append(results, fmt.Sprintf("Kubernetes Resources: Error getting status: %v", err))
+		} else {
+			results = append(results, fmt.Sprintf("Kubernetes Resources:\n%s", arsStatus))
+		}
+
+		results = append(results, fmt.Sprintf("kapp Details:\n%s", inspectOutput))
+		results = append(results, "") // Empty line between instances
+	}
+
+	return statusHeader + "\n" + strings.Join(results, "\n"), nil
 }
 
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
@@ -594,36 +664,14 @@ func (m *Manager) generateYTTDataValues(installation *deskruntypes.RunnerInstall
 				},
 			},
 		}
-	case deskruntypes.ContainerModePrivileged:
-		// For privileged mode, we need to parse the generated YAML string into a map
-		containerModeYAML := m.generatePrivilegedContainerMode(installation, instanceName, instanceNum)
-		// The function returns the full "containerMode: ..." structure, so parse it into a temp object
-		tempConfig := make(map[string]interface{})
-		if err := yaml.Unmarshal([]byte(containerModeYAML), &tempConfig); err != nil {
-			return "", fmt.Errorf("failed to parse privileged container mode YAML: %w", err)
-		}
-		// Extract the containerMode value from the parsed YAML
-		if cm, ok := tempConfig["containerMode"]; ok {
-			if cmMap, ok := cm.(map[string]interface{}); ok {
-				containerModeConfig = cmMap
-			} else {
-				return "", fmt.Errorf("containerMode is not a map: %T", cm)
-			}
-		} else {
-			return "", fmt.Errorf("containerMode not found in generated YAML")
-		}
-		// Also add template and other top-level fields from the privileged config
-		if template, ok := tempConfig["template"]; ok {
-			// For privileged mode, we need to merge both containerMode and template at the top level
-			// Reconstruct containerModeConfig to include the template
-			if tempCM, ok := tempConfig["containerMode"].(map[string]interface{}); ok {
-				containerModeConfig = tempCM
-			}
-			values["template"] = template
-		}
 	case deskruntypes.ContainerModeDinD:
 		containerModeConfig = map[string]interface{}{
 			"type": "dind",
+		}
+	case deskruntypes.ContainerModePrivileged:
+		// cached-privileged-kubernetes mode using kubernetes-novolume
+		containerModeConfig = map[string]interface{}{
+			"type": "kubernetes-novolume",
 		}
 	default:
 		return "", fmt.Errorf("unsupported container mode: %s", installation.ContainerMode)
@@ -637,55 +685,6 @@ func (m *Manager) generateYTTDataValues(installation *deskruntypes.RunnerInstall
 	}
 
 	return string(yamlData), nil
-}
-
-// generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
-// using ARC's hook extension pattern to inject privileged context into job containers only.
-// Uses kubernetes-novolume mode to avoid PVC complications - ephemeral storage is handled by the hook extension.
-func (m *Manager) generatePrivilegedContainerMode(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) string {
-	config := `containerMode:
-  type: "kubernetes-novolume"
-template:
-  spec:
-    securityContext:
-      runAsUser: 1001
-      runAsGroup: 1001
-      fsGroup: 1001
-    containers:
-    - name: runner
-      image: "ghcr.io/actions/actions-runner:latest"
-      command: ["/home/runner/run.sh"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: false
-        runAsNonRoot: true
-        runAsUser: 1001
-        runAsGroup: 1001
-      env:
-      - name: ACTIONS_RUNNER_CONTAINER_HOOKS
-        value: "/home/runner/k8s-novolume/index.js"
-      - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
-        value: "/etc/hooks/content"
-      - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
-        value: "false"`
-
-	// Add volume mounts for hook extension only
-	// Cache volumes are only needed for job containers and are defined in the hook extension
-	config += "\n      volumeMounts:"
-	config += "\n      - name: hook-extension"
-	config += "\n        mountPath: /etc/hooks"
-	config += "\n        readOnly: true"
-
-	// Define only the hook-extension volume
-	// Cache volumes are only needed for job containers and are defined in the hook extension
-	configMapName := fmt.Sprintf("privileged-hook-extension-%s", instanceName)
-	config += "\n    volumes:"
-	config += "\n    - name: hook-extension"
-	config += "\n      configMap:"
-	config += fmt.Sprintf("\n        name: %s", configMapName)
-	config += "\n        defaultMode: 0755"
-
-	return config
 }
 
 // generateHookExtensionConfigMap generates the hook extension ConfigMap YAML for privileged container mode
@@ -815,99 +814,6 @@ func sanitizeVolumeName(path string) string {
 	return name
 }
 
-// setupYttTemplateDir sets up a temporary directory with the base template and appropriate overlay
-func (m *Manager) setupYttTemplateDir(installation *deskruntypes.RunnerInstallation, tmpDir string) (string, error) {
-	templateDir := filepath.Join(tmpDir, "templates")
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create template dir: %w", err)
-	}
-
-	// Copy the base scale-set template directly as a ytt template file
-	scaleSetPath := filepath.Join(templateDir, "scale-set.yaml")
-
-	// Get base template
-	scaleSetYAML, err := arcembedded.GetScaleSetChart()
-	if err != nil {
-		return "", fmt.Errorf("failed to get scale-set chart: %w", err)
-	}
-
-	// The template should already have the basic structure
-	// We just need to write it as-is for overlays to work on
-	if err := os.WriteFile(scaleSetPath, []byte(scaleSetYAML), 0644); err != nil {
-		return "", fmt.Errorf("failed to write scale-set.yaml: %w", err)
-	}
-
-	// Replace static values with ytt data value expressions - be specific to avoid partial matches
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "https://github.com/example/repo", "#@ data.values.installation.repository")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-github-secret", "#@ data.values.installation.name + \"-gha-rs-github-secret\"")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-no-permission", "#@ data.values.installation.name + \"-gha-rs-no-permission\"")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "arc-runner-gha-rs-manager", "#@ data.values.installation.name + \"-gha-rs-manager\"")
-	// Replace remaining arc-runner references (labels, names, etc.)
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "\"arc-runner\"", "#@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, ": arc-runner", ": #@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "name: arc-runner", "name: #@ data.values.installation.name")
-	scaleSetYAML = strings.ReplaceAll(scaleSetYAML, "placeholder", "#@ data.values.installation.authValue")
-
-	// Add ytt load directive at the beginning of the file
-	scaleSetYAML = "#@ load(\"@ytt:data\", \"data\")\n" + scaleSetYAML
-
-	// Write the base template
-	if err := os.WriteFile(scaleSetPath, []byte(scaleSetYAML), 0644); err != nil {
-		return "", fmt.Errorf("failed to write scale-set.yaml: %w", err)
-	}
-
-	// Copy the universal overlay file that handles all container modes
-	overlayContent, err := arcembedded.GetUniversalOverlay()
-	if err != nil {
-		return "", fmt.Errorf("failed to get universal overlay: %w", err)
-	}
-
-	overlayPath := filepath.Join(templateDir, "overlay.yaml")
-	if err := os.WriteFile(overlayPath, []byte(overlayContent), 0644); err != nil {
-		return "", fmt.Errorf("failed to write overlay.yaml: %w", err)
-	}
-
-	return templateDir, nil
-}
-
-// getScaleSetTemplateDir returns the path to the scale-set template directory
-func (m *Manager) getScaleSetTemplateDir() string {
-	// Get the directory containing the scale-set templates and overlays
-	return "arcembedded/config/arc"
-}
-
-// createDataValuesFile creates a ytt data values file with installation-specific values
-func (m *Manager) createDataValuesFile(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int, dataValuesPath string) error {
-	// Convert cache paths to simple map format for easier ytt access
-	var cachePaths []map[string]string
-	for _, cp := range installation.CachePaths {
-		cachePaths = append(cachePaths, map[string]string{
-			"target": cp.Target,
-			"source": cp.Source,
-		})
-	}
-
-	dataValues := map[string]interface{}{
-		"installation": map[string]interface{}{
-			"name":          instanceName,
-			"repository":    installation.Repository,
-			"authValue":     installation.AuthValue,
-			"containerMode": string(installation.ContainerMode),
-			"minRunners":    installation.MinRunners,
-			"maxRunners":    installation.MaxRunners,
-			"cachePaths":    cachePaths,
-			"instanceNum":   instanceNum,
-		},
-	}
-
-	yamlBytes, err := yaml.Marshal(dataValues)
-	if err != nil {
-		return fmt.Errorf("failed to marshal data values: %w", err)
-	}
-
-	return os.WriteFile(dataValuesPath, yamlBytes, 0644)
-}
-
 func (m *Manager) ensureARCController(ctx context.Context) error {
 	// Check if CRDs are already installed
 	exists, err := m.crdExists(ctx, "autoscalingrunnersets.actions.github.com")
@@ -929,19 +835,16 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Write embedded controller templates to temp directory
-	templateDir := filepath.Join(tmpDir, "templates")
-	if err := os.MkdirAll(templateDir, 0755); err != nil {
-		return fmt.Errorf("failed to create template dir: %w", err)
-	}
-
-	// For the controller, we only need the controller chart rendered YAML
-	controllerYAML, err := arcembedded.GetControllerChart()
+	// Get controller template using the unified template package
+	processor := templates.NewProcessor()
+	controllerYAML, err := processor.GetRawTemplate(templates.TemplateTypeController)
 	if err != nil {
 		return fmt.Errorf("failed to get controller chart: %w", err)
 	}
-	controllerPath := filepath.Join(templateDir, "controller.yaml")
-	if err := os.WriteFile(controllerPath, []byte(controllerYAML), 0644); err != nil {
+
+	// Write to temp file for kapp
+	controllerPath := filepath.Join(tmpDir, "controller.yaml")
+	if err := os.WriteFile(controllerPath, controllerYAML, 0644); err != nil {
 		return fmt.Errorf("failed to write controller template: %w", err)
 	}
 

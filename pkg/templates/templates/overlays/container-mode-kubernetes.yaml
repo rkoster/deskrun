@@ -4,7 +4,8 @@
 #! Overlay for kubernetes container mode (default)
 #! This mode uses GitHub Actions runner in standard Kubernetes pod
 
-#@overlay/match by=overlay.subset({"kind":"ServiceAccount"}),expects="0+"
+#! Transform no-permission ServiceAccount
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount", "metadata": {"name": "arc-runner-gha-rs-no-permission"}}),expects=1
 ---
 metadata:
   name: #@ data.values.installation.name + "-gha-rs-no-permission"
@@ -14,6 +15,16 @@ metadata:
     actions.github.com/scale-set-name: #@ data.values.installation.name
   annotations:
     actions.github.com/cleanup-no-permission-service-account-name: #@ data.values.installation.name + "-gha-rs-no-permission"
+
+#! Transform manager ServiceAccount
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount", "metadata": {"name": "arc-runner-gha-rs-manager"}}),expects=1
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
 
 #@overlay/match by=overlay.subset({"kind":"Secret"}),expects="0+"
 ---
@@ -71,7 +82,7 @@ spec:
   
   template:
     spec:
-      serviceAccountName: #@ data.values.installation.name + "-gha-rs-no-permission"
+      serviceAccountName: #@ data.values.installation.name + "-gha-rs-manager"
       containers:
       #@overlay/match by="name"
       - name: runner

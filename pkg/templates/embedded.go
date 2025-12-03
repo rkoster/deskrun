@@ -1,4 +1,4 @@
-package arcembedded
+package templates
 
 import (
 	"embed"
@@ -10,15 +10,20 @@ import (
 // These are vendored pre-rendered Helm charts converted to ytt templates
 // with overlays for different container modes.
 
-//go:embed all:config/arc
+//go:embed all:templates
 var embeddedFS embed.FS
+
+// GetTemplateFS returns the embedded filesystem containing all templates
+func GetTemplateFS() embed.FS {
+	return embeddedFS
+}
 
 // GetTemplateFiles returns a map of filename -> content for all embedded templates
 func GetTemplateFiles() (map[string]string, error) {
 	files := map[string]string{}
 
 	// Walk through all embedded files
-	err := fs.WalkDir(embeddedFS, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(embeddedFS, "templates", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -34,10 +39,10 @@ func GetTemplateFiles() (map[string]string, error) {
 			return err
 		}
 
-		// Remove "config/arc/" prefix if present (11 chars)
+		// Remove "templates/" prefix (10 chars)
 		key := path
-		if len(path) > 11 && path[:11] == "config/arc/" {
-			key = path[11:]
+		if len(path) > 10 && path[:10] == "templates/" {
+			key = path[10:]
 		}
 
 		files[key] = string(content)
@@ -53,7 +58,7 @@ func GetTemplateFiles() (map[string]string, error) {
 
 // GetControllerChart returns the controller chart YAML
 func GetControllerChart() (string, error) {
-	content, err := embeddedFS.ReadFile("config/arc/_ytt_lib/controller/rendered.yaml")
+	content, err := embeddedFS.ReadFile("templates/controller/rendered.yaml")
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +67,7 @@ func GetControllerChart() (string, error) {
 
 // GetScaleSetChart returns the scale-set chart YAML
 func GetScaleSetChart() (string, error) {
-	content, err := embeddedFS.ReadFile("config/arc/_ytt_lib/scale-set/rendered.yaml")
+	content, err := embeddedFS.ReadFile("templates/scale-set/rendered.yaml")
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +76,7 @@ func GetScaleSetChart() (string, error) {
 
 // GetOverlay returns the specified overlay file content
 func GetOverlay(filename string) (string, error) {
-	content, err := embeddedFS.ReadFile("config/arc/overlays/" + filename)
+	content, err := embeddedFS.ReadFile("templates/overlays/" + filename)
 	if err != nil {
 		return "", err
 	}
@@ -80,7 +85,16 @@ func GetOverlay(filename string) (string, error) {
 
 // GetUniversalOverlay returns the universal overlay file that handles all container modes
 func GetUniversalOverlay() (string, error) {
-	content, err := embeddedFS.ReadFile("config/arc/overlay.yaml")
+	content, err := embeddedFS.ReadFile("templates/overlay.yaml")
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// GetSchema returns the data values schema
+func GetSchema() (string, error) {
+	content, err := embeddedFS.ReadFile("templates/values/schema.yaml")
 	if err != nil {
 		return "", err
 	}

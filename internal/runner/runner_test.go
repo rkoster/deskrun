@@ -178,3 +178,86 @@ func TestGenerateYTTDataValues_MinMaxRunners(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateHookExtensionConfigMap(t *testing.T) {
+	tests := []struct {
+		name            string
+		installation    *types.RunnerInstallation
+		instanceName    string
+		instanceNum     int
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name: "basic hook extension for cached-privileged-kubernetes",
+			installation: &types.RunnerInstallation{
+				Name:          "test-runner",
+				Repository:    "https://github.com/owner/repo",
+				ContainerMode: types.ContainerModePrivileged,
+			},
+			instanceName: "test-runner-1",
+			instanceNum:  1,
+			wantContains: []string{
+				"apiVersion: v1",
+				"kind: ConfigMap",
+				"name: privileged-hook-extension-test-runner-1",
+				"namespace: arc-systems",
+				"data:",
+				"content: |",
+				"spec:",
+				"hostPID: true",
+				"hostIPC: true",
+				"runAsUser: 0",
+				"runAsGroup: 0",
+				"fsGroup: 0",
+				`name: "$job"`,
+				"privileged: true",
+				"capabilities:",
+				"add:",
+				"SYS_ADMIN",
+				"NET_ADMIN",
+				"SYS_PTRACE",
+				"mountPath: /sys",
+				"mountPath: /sys/fs/cgroup",
+				"mountPath: /proc",
+				"mountPath: /dev",
+				"mountPath: /dev/pts",
+				"mountPath: /dev/shm",
+				"hostPath:",
+				"path: /sys",
+				"path: /sys/fs/cgroup",
+				"path: /proc",
+				"path: /dev",
+				"path: /dev/pts",
+				"path: /dev/shm",
+				"type: Directory",
+			},
+			wantNotContains: []string{
+				// Hook extension should NOT contain runner-specific config
+				"ACTIONS_RUNNER_CONTAINER_HOOKS",
+				"runAsNonRoot: true",
+				// Should not duplicate volumes already in template
+				"work",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Manager{}
+			got := m.generateHookExtensionConfigMap(tt.installation, tt.instanceName, tt.instanceNum)
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("generateHookExtensionConfigMap() missing expected content %q", want)
+				}
+			}
+
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(got, notWant) {
+					t.Errorf("generateHookExtensionConfigMap() contains unexpected content %q", notWant)
+				}
+			}
+		})
+	}
+}

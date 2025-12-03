@@ -5,14 +5,6 @@
 #! Universal overlay that applies transformations based on container mode
 
 #! Apply name and repository transformations to all resources
-#@overlay/match by=overlay.subset({"kind":"ServiceAccount"}),expects="0+"
----
-metadata:
-  name: #@ data.values.installation.name + "-gha-rs-no-permission"
-  labels:
-    app.kubernetes.io/name: #@ data.values.installation.name
-    app.kubernetes.io/instance: #@ data.values.installation.name
-    actions.github.com/scale-set-name: #@ data.values.installation.name
 
 #@overlay/match by=overlay.subset({"kind":"Secret"}),expects="0+"
 ---
@@ -24,6 +16,24 @@ metadata:
     actions.github.com/scale-set-name: #@ data.values.installation.name
 data:
   github_token: #@ base64.encode(data.values.installation.authValue)
+
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount","metadata":{"name":"arc-runner-gha-rs-no-permission"}}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-no-permission"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount","metadata":{"name":"arc-runner-gha-rs-manager"}}),expects="0+"
+---
+metadata:
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+  labels:
+    app.kubernetes.io/name: #@ data.values.installation.name
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    actions.github.com/scale-set-name: #@ data.values.installation.name
 
 #@overlay/match by=overlay.subset({"kind":"Role"}),expects="0+"
 ---
@@ -67,9 +77,17 @@ spec:
   githubConfigUrl: #@ data.values.installation.repository
   githubConfigSecret: #@ data.values.installation.name + "-gha-rs-github-secret"
   
+  #! Set containerMode type explicitly for cached-privileged-kubernetes
+  #@ if data.values.installation.containerMode == "cached-privileged-kubernetes":
+  #@overlay/match missing_ok=True
+  containerMode:
+    type: "kubernetes-novolume"
+  #@ end
+  
   template:
     spec:
-      serviceAccountName: #@ data.values.installation.name + "-gha-rs-no-permission"
+      #! Use manager service account for kubernetes modes that need pod permissions
+      serviceAccountName: #@ data.values.installation.name + ("-gha-rs-manager" if data.values.installation.containerMode in ["kubernetes", "cached-privileged-kubernetes"] else "-gha-rs-no-permission")
       
       #! Container mode specific configurations
       #@ if data.values.installation.containerMode == "cached-privileged-kubernetes":
@@ -90,6 +108,9 @@ spec:
         #@overlay/match missing_ok=True
         securityContext:
           privileged: true
+          allowPrivilegeEscalation: true
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false
         #@ end
         
         #@overlay/match missing_ok=True
@@ -113,6 +134,11 @@ spec:
         #@overlay/append
         - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
           value: "false"
+        #@overlay/append
+        - name: ACTIONS_RUNNER_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         #@ end
         
         #@overlay/match missing_ok=True
@@ -124,19 +150,14 @@ spec:
           mountPath: /home/runner/_work
         #@ elif data.values.installation.containerMode == "cached-privileged-kubernetes":
         #@overlay/append
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-        #@overlay/append
         - name: hook-extension
           mountPath: /etc/hooks
           readOnly: true
-        #! Add cache path mounts for privileged mode
-        #@ if len(data.values.installation.cachePaths) > 0:
-        #@ for i, path in enumerate(data.values.installation.cachePaths):
+        #! Mount cache paths directly in privileged runner container
+        #@ for i, cachePath in enumerate(data.values.installation.cachePaths):
         #@overlay/append
-        - name: #@ "cache-{}".format(i)
-          mountPath: #@ path["target"]
-        #@ end
+        - name: #@ "cache-" + str(i)
+          mountPath: #@ cachePath.target
         #@ end
         #@ end
 
@@ -169,23 +190,49 @@ spec:
         emptyDir: {}
       #@ elif data.values.installation.containerMode == "cached-privileged-kubernetes":
       #@overlay/append
-      - name: docker-socket
-        hostPath:
-          path: /var/run/docker.sock
-          type: Socket
-      #@overlay/append
       - name: hook-extension
         configMap:
           name: #@ "privileged-hook-extension-" + data.values.installation.name
           defaultMode: 0755
-      #! Add cache path volumes for privileged mode
-      #@ if len(data.values.installation.cachePaths) > 0:
-      #@ for i, path in enumerate(data.values.installation.cachePaths):
+      #! Cache path volumes are defined at pod level for job containers to use via hook extension
+      #! These volumes are NOT mounted in runner container, only in job containers via hooks
+      #@ for i, cachePath in enumerate(data.values.installation.cachePaths):
       #@overlay/append
-      - name: #@ "cache-{}".format(i)
+      - name: #@ "cache-" + str(i)
+        #@ if cachePath.source == "":
+        emptyDir: {}
+        #@ else:
         hostPath:
-          path: #@ path["source"]
+          path: #@ cachePath.source
           type: DirectoryOrCreate
+        #@ end
       #@ end
       #@ end
-      #@ end
+
+#! Add extended RBAC permissions for kubernetes modes that need pod management
+#@ if data.values.installation.containerMode in ["kubernetes", "cached-privileged-kubernetes"]:
+#@overlay/match by=overlay.subset({"kind":"Role"}),expects="0+"
+---
+rules:
+#@overlay/append
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list"]
+#@overlay/append  
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["get", "create"]
+#@overlay/append
+- apiGroups: [""]  
+  resources: ["pods/log"]
+  verbs: ["get", "list", "watch"]
+
+#! Update the RoleBinding to include the manager service account
+#@overlay/match by=overlay.subset({"kind":"RoleBinding"}),expects="0+"
+---
+subjects:
+#@overlay/append
+- kind: ServiceAccount
+  name: #@ data.values.installation.name + "-gha-rs-manager"  
+  namespace: arc-systems
+#@ end

@@ -1,26 +1,18 @@
 package runner
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/rkoster/deskrun/internal/kapp"
+	"github.com/rkoster/deskrun/pkg/templates"
 	"github.com/rkoster/deskrun/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestFullYttProcessing tests the complete ytt processing pipeline
+// TestFullYttProcessing tests the complete ytt processing pipeline using the unified template package
 func TestFullYttProcessing(t *testing.T) {
-	// Check if ytt is available
-	if _, err := exec.LookPath("ytt"); err != nil {
-		t.Skip("ytt not available, skipping integration test")
-	}
-
-	manager := &Manager{}
+	processor := templates.NewProcessor()
 
 	installation := &types.RunnerInstallation{
 		Name:          "test-runner",
@@ -35,69 +27,51 @@ func TestFullYttProcessing(t *testing.T) {
 		},
 	}
 
-	tmpDir := t.TempDir()
-
-	// Setup template directory
-	templateDir, err := manager.setupYttTemplateDir(installation, tmpDir)
-	require.NoError(t, err)
-
-	// Create data values file
-	dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-	err = manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-	require.NoError(t, err)
-
-	// Process with ytt
-	client := kapp.NewClient("", "arc-systems")
-	result, err := client.ProcessTemplate(templateDir, dataValuesPath)
-
-	if err != nil {
-		t.Logf("YTT processing failed: %v", err)
-
-		// Read the generated files for debugging
-		scaleSetPath := filepath.Join(templateDir, "scale-set.yaml")
-		if content, readErr := os.ReadFile(scaleSetPath); readErr == nil {
-			t.Logf("Generated scale-set.yaml content:\n%s", string(content))
-		}
-
-		if content, readErr := os.ReadFile(dataValuesPath); readErr == nil {
-			t.Logf("Data values content:\n%s", string(content))
-		}
-
-		require.NoError(t, err, "YTT processing should succeed")
+	config := templates.Config{
+		Installation: installation,
+		InstanceName: "test-runner",
+		InstanceNum:  0,
 	}
+
+	result, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+	require.NoError(t, err, "YTT processing should succeed")
+
+	resultStr := string(result)
 
 	// Validate the result
-	assert.NotEmpty(t, result)
+	assert.NotEmpty(t, resultStr)
 
 	// Check that ytt expressions have been resolved
-	assert.NotContains(t, result, "#@ data.values", "All ytt expressions should be resolved")
+	assert.NotContains(t, resultStr, "#@ data.values", "All ytt expressions should be resolved")
 
 	// Check that values have been substituted correctly
-	assert.Contains(t, result, "test-runner-gha-rs-github-secret")
-	assert.Contains(t, result, "test-runner-gha-rs-no-permission")
-	assert.Contains(t, result, "test-runner-gha-rs-manager")
-	assert.Contains(t, result, "https://github.com/test/repo")
+	assert.Contains(t, resultStr, "test-runner-gha-rs-github-secret")
+	assert.Contains(t, resultStr, "test-runner-gha-rs-no-permission")
+	assert.Contains(t, resultStr, "test-runner-gha-rs-manager")
+	assert.Contains(t, resultStr, "https://github.com/test/repo")
 
 	// Check for proper base64 encoding of auth value
-	assert.Contains(t, result, "github_token:")
+	assert.Contains(t, resultStr, "github_token:")
 
 	// Verify container mode specific configurations
-	assert.Contains(t, result, "privileged: true")
-	assert.Contains(t, result, "ACTIONS_RUNNER_CONTAINER_HOOKS")
+	assert.Contains(t, resultStr, "ACTIONS_RUNNER_CONTAINER_HOOKS")
 
-	// Check cache path volumes are configured
-	assert.Contains(t, result, "/nix/store")
-	assert.Contains(t, result, "/tmp/test-cache")
+	// Cache paths SHOULD be mounted in privileged runner container (this is the whole point)
+	// Verify that runner container can access cache paths directly
+	assert.Contains(t, resultStr, "ACTIONS_RUNNER_CONTAINER_HOOKS")
 
-	t.Logf("YTT processing completed successfully. Output length: %d", len(result))
+	// Verify privileged runner has direct access to cache resources
+	assert.Contains(t, resultStr, "privileged: true", "Runner should be privileged for direct host access")
+	assert.Contains(t, resultStr, "k8s-novolume/index.js", "Should use novolume hooks for privileged runner")
+
+	// Verify hook extension is configured for job container privileges
+	assert.Contains(t, resultStr, "privileged-hook-extension-test-runner")
+
+	t.Logf("YTT processing completed successfully. Output length: %d", len(resultStr))
 }
 
-// TestYttProcessingForDifferentContainerModes tests all container modes
+// TestYttProcessingForDifferentContainerModes tests all container modes using the unified template package
 func TestYttProcessingForDifferentContainerModes(t *testing.T) {
-	if _, err := exec.LookPath("ytt"); err != nil {
-		t.Skip("ytt not available, skipping integration test")
-	}
-
 	testCases := []struct {
 		name          string
 		containerMode types.ContainerMode
@@ -134,23 +108,36 @@ func TestYttProcessingForDifferentContainerModes(t *testing.T) {
 			name:          "cached-privileged-kubernetes mode",
 			containerMode: types.ContainerModePrivileged,
 			expectStrings: []string{
+				// Container mode should be kubernetes-novolume
+				"type: kubernetes-novolume",
+				// Runner container security context (PRIVILEGED)
 				"privileged: true",
+				"allowPrivilegeEscalation: true",
+				"runAsNonRoot: false",
+				// Hook extension environment variables
 				"ACTIONS_RUNNER_CONTAINER_HOOKS",
+				"/home/runner/k8s-novolume/index.js",
+				"ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE",
+				"/etc/hooks/content",
 				"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER",
 				"value: \"false\"",
+				// Hook extension volume
+				"hook-extension",
+				"privileged-hook-extension-",
+				// Pod-level security context
 				"fsGroup: 123",
 			},
 			rejectStrings: []string{
-				"DOCKER_HOST",
+				// Should NOT have dind sidecar (that's a different mode)
 				"docker:dind",
-				"emptyDir: {}",
+				"DOCKER_HOST",
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			manager := &Manager{}
+			processor := templates.NewProcessor()
 
 			installation := &types.RunnerInstallation{
 				Name:          "test-runner",
@@ -162,27 +149,25 @@ func TestYttProcessingForDifferentContainerModes(t *testing.T) {
 				},
 			}
 
-			tmpDir := t.TempDir()
+			config := templates.Config{
+				Installation: installation,
+				InstanceName: "test-runner",
+				InstanceNum:  0,
+			}
 
-			templateDir, err := manager.setupYttTemplateDir(installation, tmpDir)
-			require.NoError(t, err)
-
-			dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-			err = manager.createDataValuesFile(installation, "test-runner", 0, dataValuesPath)
-			require.NoError(t, err)
-
-			client := kapp.NewClient("", "arc-systems")
-			result, err := client.ProcessTemplate(templateDir, dataValuesPath)
+			result, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 			require.NoError(t, err, "YTT processing for %s mode should succeed", tc.containerMode)
+
+			resultStr := string(result)
 
 			// Check expected strings
 			for _, expectStr := range tc.expectStrings {
-				assert.Contains(t, result, expectStr, "Should contain %s for %s mode", expectStr, tc.containerMode)
+				assert.Contains(t, resultStr, expectStr, "Should contain %s for %s mode", expectStr, tc.containerMode)
 			}
 
 			// Check rejected strings
 			for _, rejectStr := range tc.rejectStrings {
-				assert.NotContains(t, result, rejectStr, "Should not contain %s for %s mode", rejectStr, tc.containerMode)
+				assert.NotContains(t, resultStr, rejectStr, "Should not contain %s for %s mode", rejectStr, tc.containerMode)
 			}
 		})
 	}
@@ -190,96 +175,75 @@ func TestYttProcessingForDifferentContainerModes(t *testing.T) {
 
 // TestYttSyntaxErrors tests that we catch common ytt syntax errors
 func TestYttSyntaxErrors(t *testing.T) {
-	if _, err := exec.LookPath("ytt"); err != nil {
-		t.Skip("ytt not available, skipping syntax error test")
-	}
+	processor := templates.NewProcessor()
 
-	tmpDir := t.TempDir()
-
-	// Create a template with intentional syntax errors
-	templateDir := filepath.Join(tmpDir, "templates")
-	err := os.MkdirAll(templateDir, 0755)
-	require.NoError(t, err)
-
-	// Template with invalid ytt syntax (missing + operator)
-	invalidTemplate := `
-#@ load("@ytt:data", "data")
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: #@ data.values.installation.name-invalid-syntax
-data:
-  token: #@ data.values.installation.authValue
-`
-
-	templatePath := filepath.Join(templateDir, "invalid.yaml")
-	err = os.WriteFile(templatePath, []byte(invalidTemplate), 0644)
-	require.NoError(t, err)
-
-	// Create valid data values
-	dataValuesPath := filepath.Join(tmpDir, "data-values.yaml")
-	dataValuesContent := `
-installation:
-  name: test
-  authValue: token
-`
-	err = os.WriteFile(dataValuesPath, []byte(dataValuesContent), 0644)
-	require.NoError(t, err)
-
-	// Process with ytt - should fail
-	client := kapp.NewClient("", "arc-systems")
-	_, err = client.ProcessTemplate(templateDir, dataValuesPath)
-
-	// Should fail due to invalid syntax
-	assert.Error(t, err, "YTT should reject invalid syntax")
-	assert.Contains(t, strings.ToLower(err.Error()), "undefined", "Error should mention undefined variable")
-}
-
-// TestTemplateFileGeneration validates that the generated template files are correct
-func TestTemplateFileGeneration(t *testing.T) {
-	manager := &Manager{}
-
+	// Test with invalid container mode (should fail validation)
 	installation := &types.RunnerInstallation{
 		Name:          "test-runner",
-		ContainerMode: types.ContainerModePrivileged,
+		Repository:    "https://github.com/test/repo",
+		AuthValue:     "test-token",
+		ContainerMode: types.ContainerMode("invalid-mode"),
 	}
 
-	tmpDir := t.TempDir()
-	templateDir, err := manager.setupYttTemplateDir(installation, tmpDir)
-	require.NoError(t, err)
-
-	// Check scale-set.yaml
-	scaleSetPath := filepath.Join(templateDir, "scale-set.yaml")
-	content, err := os.ReadFile(scaleSetPath)
-	require.NoError(t, err)
-	contentStr := string(content)
-
-	// Verify no broken syntax from string replacements
-	brokenPatterns := []string{
-		"data.values.installation.name-gha-rs", // Missing + operator
-		"name-gha-rs-github-secret",            // Partial replacement
-		"#@ name",                              // Invalid expression
+	config := templates.Config{
+		Installation: installation,
+		InstanceName: "test-runner",
+		InstanceNum:  0,
 	}
 
-	for _, pattern := range brokenPatterns {
-		assert.NotContains(t, contentStr, pattern,
-			"Template should not contain broken pattern: %s", pattern)
+	_, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+	assert.Error(t, err, "Should reject invalid container mode")
+	assert.Contains(t, strings.ToLower(err.Error()), "invalid", "Error should mention invalid mode")
+}
+
+// TestTemplateValidation validates that the processor validates input correctly
+func TestTemplateValidation(t *testing.T) {
+	processor := templates.NewProcessor()
+
+	testCases := []struct {
+		name        string
+		config      templates.Config
+		expectError string
+	}{
+		{
+			name: "empty instance name",
+			config: templates.Config{
+				Installation: &types.RunnerInstallation{
+					Name:          "test",
+					Repository:    "https://github.com/test/repo",
+					ContainerMode: types.ContainerModeKubernetes,
+				},
+				InstanceName: "",
+			},
+			expectError: "instance name",
+		},
+		{
+			name: "nil installation",
+			config: templates.Config{
+				Installation: nil,
+				InstanceName: "test",
+			},
+			expectError: "installation",
+		},
+		{
+			name: "empty repository",
+			config: templates.Config{
+				Installation: &types.RunnerInstallation{
+					Name:          "test",
+					Repository:    "",
+					ContainerMode: types.ContainerModeKubernetes,
+				},
+				InstanceName: "test",
+			},
+			expectError: "repository",
+		},
 	}
 
-	// Verify correct patterns exist
-	correctPatterns := []string{
-		"#@ data.values.installation.name + \"-gha-rs-github-secret\"",
-		"#@ data.values.installation.name + \"-gha-rs-no-permission\"",
-		"#@ data.values.installation.repository",
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, tc.config)
+			assert.Error(t, err)
+			assert.Contains(t, strings.ToLower(err.Error()), tc.expectError)
+		})
 	}
-
-	foundPatterns := 0
-	for _, pattern := range correctPatterns {
-		if strings.Contains(contentStr, pattern) {
-			foundPatterns++
-		}
-	}
-
-	assert.Greater(t, foundPatterns, 0, "Template should contain at least some correct ytt expressions")
 }

@@ -1,0 +1,261 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: test-runner-gha-rs-no-permission
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: test-runner
+    app.kubernetes.io/instance: test-runner
+    app.kubernetes.io/version: 0.13.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: test-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations: null
+  finalizers:
+  - actions.github.com/cleanup-protection
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: test-runner-gha-rs-manager
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: test-runner
+    app.kubernetes.io/instance: test-runner
+    app.kubernetes.io/version: 0.13.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: test-runner
+    actions.github.com/scale-set-namespace: arc-systems
+    app.kubernetes.io/component: manager-serviceaccount
+  annotations: null
+  finalizers:
+  - actions.github.com/cleanup-protection
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-runner-gha-rs-github-secret
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: test-runner
+    app.kubernetes.io/instance: test-runner
+    app.kubernetes.io/version: 0.13.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: test-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations: null
+  finalizers:
+  - actions.github.com/cleanup-protection
+data:
+  github_token: dGVzdC10b2tlbg==
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: test-runner-gha-rs-manager
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: test-runner
+    app.kubernetes.io/instance: test-runner
+    app.kubernetes.io/version: 0.13.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: test-runner
+    actions.github.com/scale-set-namespace: arc-systems
+    app.kubernetes.io/component: manager-role
+  annotations: null
+  finalizers:
+  - actions.github.com/cleanup-protection
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - pods/status
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - get
+  - create
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: test-runner-gha-rs-manager
+  namespace: arc-systems
+  labels:
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: test-runner
+    app.kubernetes.io/instance: test-runner
+    app.kubernetes.io/version: 0.13.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: test-runner
+    actions.github.com/scale-set-namespace: arc-systems
+    app.kubernetes.io/component: manager-role-binding
+  annotations: null
+  finalizers:
+  - actions.github.com/cleanup-protection
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: test-runner-gha-rs-manager
+subjects:
+- kind: ServiceAccount
+  name: arc-gha-rs-controller
+  namespace: arc-systems
+- kind: ServiceAccount
+  name: arc-controller-gha-rs-controller
+  namespace: arc-systems
+- kind: ServiceAccount
+  name: test-runner-gha-rs-manager
+  namespace: arc-systems
+---
+apiVersion: actions.github.com/v1alpha1
+kind: AutoscalingRunnerSet
+metadata:
+  name: test-runner
+  namespace: arc-systems
+  labels:
+    app.kubernetes.io/component: autoscaling-runner-set
+    helm.sh/chart: gha-rs-0.13.0
+    app.kubernetes.io/name: test-runner
+    app.kubernetes.io/instance: test-runner
+    app.kubernetes.io/version: 0.13.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: gha-rs
+    actions.github.com/scale-set-name: test-runner
+    actions.github.com/scale-set-namespace: arc-systems
+  annotations:
+    actions.github.com/values-hash: 1f7e2e25cd46a1879cce3ccca83387e2ce41e747dd30ff17b6f6db794caf857
+    actions.github.com/cleanup-github-secret-name: test-runner-gha-rs-github-secret
+    actions.github.com/cleanup-manager-role-binding: test-runner-gha-rs-manager
+    actions.github.com/cleanup-manager-role-name: test-runner-gha-rs-manager
+    actions.github.com/cleanup-no-permission-service-account-name: test-runner-gha-rs-no-permission
+spec:
+  githubConfigUrl: https://github.com/test/repo
+  githubConfigSecret: test-runner-gha-rs-github-secret
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: test-runner-gha-rs-manager
+      containers:
+      - name: runner
+        command:
+        - /home/runner/run.sh
+        image: ghcr.io/actions/actions-runner:latest
+        securityContext:
+          privileged: true
+          allowPrivilegeEscalation: true
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false
+        env:
+        - name: ACTIONS_RUNNER_CONTAINER_HOOKS
+          value: /home/runner/k8s-novolume/index.js
+        - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+          value: /etc/hooks/content
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          value: "false"
+        - name: ACTIONS_RUNNER_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: hook-extension
+          mountPath: /etc/hooks
+          readOnly: true
+        - name: cache-0
+          mountPath: /var/lib/docker
+        - name: cache-1
+          mountPath: /nix/store
+      securityContext:
+        fsGroup: 123
+      volumes:
+      - name: hook-extension
+        configMap:
+          name: privileged-hook-extension-test-runner
+          defaultMode: 493
+      - name: cache-0
+        hostPath:
+          path: /var/lib/docker
+          type: DirectoryOrCreate
+      - name: cache-1
+        hostPath:
+          path: /nix/store
+          type: DirectoryOrCreate
+  containerMode:
+    type: kubernetes-novolume

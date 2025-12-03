@@ -8,7 +8,6 @@ import (
 
 	kappcmd "carvel.dev/kapp/pkg/kapp/cmd"
 	"github.com/cppforlife/go-cli-ui/ui"
-	"gopkg.in/yaml.v3"
 )
 
 // Client provides an interface for kapp and ytt operations
@@ -125,7 +124,6 @@ func (c *Client) List() ([]string, error) {
 		"list",
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
-		"--json",
 	})
 
 	// Capture output
@@ -141,23 +139,18 @@ func (c *Client) List() ([]string, error) {
 		return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, errBuf.String())
 	}
 
-	// Parse JSON output to extract app names
-	var result struct {
-		Tables []struct {
-			Rows []struct {
-				Name string `yaml:"name"`
-			} `yaml:"rows"`
-		} `yaml:"tables"`
-	}
-
-	if err := yaml.Unmarshal(outBuf.Bytes(), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp list output: %w", err)
-	}
-
+	// Parse the plain text output manually
+	lines := strings.Split(strings.TrimSpace(outBuf.String()), "\n")
 	var names []string
-	if len(result.Tables) > 0 {
-		for _, row := range result.Tables[0].Rows {
-			names = append(names, row.Name)
+
+	// Skip header line and parse app names
+	for i, line := range lines {
+		if i == 0 && strings.Contains(line, "Name") {
+			continue // Skip header
+		}
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] != "" {
+			names = append(names, fields[0])
 		}
 	}
 
