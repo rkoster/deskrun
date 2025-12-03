@@ -52,9 +52,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Detect available nix mounts
+	nixStore, nixSocket := cluster.DetectNixMounts()
+
 	// Setup cluster manager
 	clusterConfig := &types.ClusterConfig{
-		Name: configMgr.GetConfig().ClusterName,
+		Name:      configMgr.GetConfig().ClusterName,
+		NixStore:  nixStore,
+		NixSocket: nixSocket,
 	}
 	clusterMgr := cluster.NewManager(clusterConfig)
 
