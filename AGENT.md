@@ -262,7 +262,7 @@ cachePaths:
 
 ### ACCEPT_DIFF: Regenerating Expected Test Files
 
-When templates change (overlays, schema, or base templates), the expected test output files need to be regenerated. Use the `ACCEPT_DIFF=1` environment variable to automatically update expected files from actual test output.
+When templates change (overlays, schema, or base templates), the expected test output files need to be regenerated. Use the `ACCEPT_DIFF=true` environment variable to automatically update expected files from actual test output.
 
 **When to use:**
 - After modifying templates in `pkg/templates/templates/`
@@ -272,18 +272,18 @@ When templates change (overlays, schema, or base templates), the expected test o
 **Usage:**
 ```bash
 # Regenerate expected files for pkg/templates tests
-ACCEPT_DIFF=1 go test ./pkg/templates/...
+ACCEPT_DIFF=true go test ./pkg/templates/...
 
 # Regenerate expected files for internal/runner tests  
-ACCEPT_DIFF=1 go test ./internal/runner/...
+ACCEPT_DIFF=true go test ./internal/runner/...
 
 # Regenerate all expected files
-ACCEPT_DIFF=1 go test ./...
+ACCEPT_DIFF=true go test ./...
 ```
 
 **How it works:**
 1. Tests render templates with various configurations
-2. When `ACCEPT_DIFF=1` is set, actual output overwrites expected files
+2. When `ACCEPT_DIFF=true` is set, actual output overwrites expected files
 3. Expected files are stored in `testdata/expected/` directories:
    - `pkg/templates/testdata/expected/` - processor tests
    - `internal/runner/template_spec/testdata/expected/` - runner tests
@@ -300,7 +300,7 @@ ACCEPT_DIFF=1 go test ./...
 vim pkg/templates/templates/overlays/container-mode-privileged.yaml
 
 # 2. Regenerate expected files
-ACCEPT_DIFF=1 go test ./...
+ACCEPT_DIFF=true go test ./...
 
 # 3. Review changes
 git diff
@@ -311,6 +311,42 @@ go test ./...
 # 5. Commit together
 git add -A && git commit -m "feat: update privileged mode template"
 ```
+
+### Test-Driven Overlay Development
+
+When developing or fixing ytt overlays, use a test-driven approach:
+
+1. **First, modify the expected test files** to reflect the desired output
+2. **Run tests to confirm they fail** - this validates your expected change is correct
+3. **Modify the overlay** to make the tests pass
+4. **Iterate** until all tests pass
+
+**Example: Removing finalizers from manager ServiceAccount**
+
+```bash
+# 1. Edit expected file to remove the finalizer you want gone
+vim pkg/templates/testdata/expected/kubernetes_basic.yaml
+# Remove the finalizers section from the manager ServiceAccount
+
+# 2. Run test to see it fail (confirms expected file is correct)
+go test ./pkg/templates/... -run TestProcessTemplate/kubernetes-basic -v
+# Should show: "one map entry added: finalizers: ..."
+
+# 3. Fix the overlay to match expected output
+vim pkg/templates/templates/overlay.yaml
+# Add overlay directive to remove finalizers
+
+# 4. Run test again - should pass now
+go test ./pkg/templates/... -run TestProcessTemplate/kubernetes-basic -v
+
+# 5. Update ALL expected files and run full test suite
+ACCEPT_DIFF=true go test ./pkg/templates/... ./internal/runner/...
+
+# 6. Verify all tests pass
+go test ./pkg/templates/... ./internal/runner/...
+```
+
+**Key insight:** The overlay matching must account for template transformations. The Go processor transforms names like `arc-runner-gha-rs-manager` into ytt expressions before overlays are applied. Match by labels (e.g., `app.kubernetes.io/component`) instead of by name when the name is dynamically generated.
 
 ---
 

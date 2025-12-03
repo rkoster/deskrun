@@ -26,7 +26,8 @@ metadata:
     app.kubernetes.io/instance: #@ data.values.installation.name
     actions.github.com/scale-set-name: #@ data.values.installation.name
 
-#@overlay/match by=overlay.subset({"kind":"ServiceAccount","metadata":{"name":"arc-runner-gha-rs-manager"}}),expects="0+"
+#! Match manager ServiceAccount by component label (not by name, since name is transformed to ytt expression)
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount","metadata":{"labels":{"app.kubernetes.io/component":"manager-serviceaccount"}}}),expects="0+"
 ---
 metadata:
   name: #@ data.values.installation.name + "-gha-rs-manager"
@@ -34,6 +35,11 @@ metadata:
     app.kubernetes.io/name: #@ data.values.installation.name
     app.kubernetes.io/instance: #@ data.values.installation.name
     actions.github.com/scale-set-name: #@ data.values.installation.name
+  #! Remove finalizer from manager ServiceAccount because the ARC controller
+  #! does not have an annotation to clean it up (unlike the no-permission SA).
+  #! This is a workaround for an upstream ARC Helm chart limitation.
+  #@overlay/remove
+  finalizers:
 
 #@overlay/match by=overlay.subset({"kind":"Role"}),expects="0+"
 ---

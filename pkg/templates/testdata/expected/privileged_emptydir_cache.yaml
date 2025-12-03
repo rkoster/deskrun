@@ -32,8 +32,6 @@ metadata:
     actions.github.com/scale-set-namespace: arc-systems
     app.kubernetes.io/component: manager-serviceaccount
   annotations: null
-  finalizers:
-  - actions.github.com/cleanup-protection
 ---
 apiVersion: v1
 kind: Secret
