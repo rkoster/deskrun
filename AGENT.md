@@ -258,6 +258,62 @@ cachePaths:
 
 ---
 
+## Development Workflows
+
+### ACCEPT_DIFF: Regenerating Expected Test Files
+
+When templates change (overlays, schema, or base templates), the expected test output files need to be regenerated. Use the `ACCEPT_DIFF=1` environment variable to automatically update expected files from actual test output.
+
+**When to use:**
+- After modifying templates in `pkg/templates/templates/`
+- When adding new container modes or overlay configurations
+- When test output intentionally changes due to feature updates
+
+**Usage:**
+```bash
+# Regenerate expected files for pkg/templates tests
+ACCEPT_DIFF=1 go test ./pkg/templates/...
+
+# Regenerate expected files for internal/runner tests  
+ACCEPT_DIFF=1 go test ./internal/runner/...
+
+# Regenerate all expected files
+ACCEPT_DIFF=1 go test ./...
+```
+
+**How it works:**
+1. Tests render templates with various configurations
+2. When `ACCEPT_DIFF=1` is set, actual output overwrites expected files
+3. Expected files are stored in `testdata/expected/` directories:
+   - `pkg/templates/testdata/expected/` - processor tests
+   - `internal/runner/template_spec/testdata/expected/` - runner tests
+
+**After regenerating:**
+1. Review the diffs carefully with `git diff`
+2. Verify changes are intentional and correct
+3. Run tests again without `ACCEPT_DIFF` to confirm they pass
+4. Commit the updated expected files with the template changes
+
+**Example workflow:**
+```bash
+# 1. Make template changes
+vim pkg/templates/templates/overlays/container-mode-privileged.yaml
+
+# 2. Regenerate expected files
+ACCEPT_DIFF=1 go test ./...
+
+# 3. Review changes
+git diff
+
+# 4. Verify tests pass
+go test ./...
+
+# 5. Commit together
+git add -A && git commit -m "feat: update privileged mode template"
+```
+
+---
+
 ## Summary
 
 **DeskRun prioritizes performance and functionality over isolation for single-maintainer development environments.** The cached-privileged-kubernetes mode provides optimal bare metal performance with NVMe cache integration, specifically designed for rubionic-workspace workflows requiring Nix daemon access and high-speed build caching.

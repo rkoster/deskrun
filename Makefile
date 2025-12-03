@@ -106,22 +106,21 @@ vendor-charts:
 		--untardir /tmp/arc-controller-chart
 	@echo ""
 	@echo "Rendering ARC controller chart v0.13.0..."
-	@mkdir -p arcembedded/config/arc/_ytt_lib/controller
+	@mkdir -p pkg/templates/templates/controller
 	@helm template arc-controller \
 		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
 		--version 0.13.0 \
 		--namespace arc-systems \
-		> arcembedded/config/arc/_ytt_lib/controller/rendered.yaml
-	@echo "ARC controller chart rendered to arcembedded/config/arc/_ytt_lib/controller/rendered.yaml"
+		> pkg/templates/templates/controller/rendered.yaml
+	@echo "ARC controller chart rendered to pkg/templates/templates/controller/rendered.yaml"
 	@echo ""
 	@echo "Adding CRDs to controller chart..."
-	@mkdir -p arcembedded/config/arc/_ytt_lib/controller
-	@echo "---" >> arcembedded/config/arc/_ytt_lib/controller/rendered.yaml
-	@cat /tmp/arc-controller-chart/gha-runner-scale-set-controller/crds/*.yaml >> arcembedded/config/arc/_ytt_lib/controller/rendered.yaml
-	@echo "CRDs added to arcembedded/config/arc/_ytt_lib/controller/rendered.yaml"
+	@echo "---" >> pkg/templates/templates/controller/rendered.yaml
+	@cat /tmp/arc-controller-chart/gha-runner-scale-set-controller/crds/*.yaml >> pkg/templates/templates/controller/rendered.yaml
+	@echo "CRDs added to pkg/templates/templates/controller/rendered.yaml"
 	@echo ""
 	@echo "Rendering ARC scale-set chart v0.13.0..."
-	@mkdir -p arcembedded/config/arc/_ytt_lib/scale-set
+	@mkdir -p pkg/templates/templates/scale-set
 	@helm template arc-runner \
 		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
 		--version 0.13.0 \
@@ -130,8 +129,8 @@ vendor-charts:
 		--set githubConfigSecret.github_token=placeholder \
 		--set controllerServiceAccount.name=arc-gha-rs-controller \
 		--set controllerServiceAccount.namespace=arc-systems \
-		> arcembedded/config/arc/_ytt_lib/scale-set/rendered.yaml
-	@echo "ARC scale-set chart rendered to arcembedded/config/arc/_ytt_lib/scale-set/rendered.yaml"
+		> pkg/templates/templates/scale-set/rendered.yaml
+	@echo "ARC scale-set chart rendered to pkg/templates/templates/scale-set/rendered.yaml"
 	@echo ""
 	@echo "Cleaning up temporary files..."
 	@rm -rf /tmp/arc-controller-chart
