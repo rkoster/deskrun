@@ -10,6 +10,9 @@ directories:
           version: "0.13.0"
           repository:
             url: oci://ghcr.io/actions/actions-runner-controller-charts
+        excludePaths:
+          - tests/**/*
+          - tests
 
   - path: upstream/gha-runner-scale-set
     contents:
@@ -19,3 +22,6 @@ directories:
           version: "0.13.0"
           repository:
             url: oci://ghcr.io/actions/actions-runner-controller-charts
+        excludePaths:
+          - tests/**/*
+          - tests

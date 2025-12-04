@@ -836,8 +836,18 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Get controller template using the unified template package
+	// ProcessTemplate applies the overlay which adds required RBAC permissions
 	processor := templates.NewProcessor()
-	controllerYAML, err := processor.GetRawTemplate(templates.TemplateTypeController)
+	config := templates.Config{
+		Installation: &deskruntypes.RunnerInstallation{
+			Name:          "arc-controller",
+			Repository:    "https://github.com/placeholder",
+			ContainerMode: deskruntypes.ContainerModeKubernetes,
+		},
+		InstanceName: "arc-controller",
+		InstanceNum:  1,
+	}
+	controllerYAML, err := processor.ProcessTemplate(templates.TemplateTypeController, config)
 	if err != nil {
 		return fmt.Errorf("failed to get controller chart: %w", err)
 	}

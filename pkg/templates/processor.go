@@ -63,15 +63,36 @@ func (p *Processor) GetRawTemplate(templateType TemplateType) ([]byte, error) {
 	}
 }
 
-// processControllerTemplate processes the ARC controller template
+// processControllerTemplate processes the ARC controller template with overlays
 func (p *Processor) processControllerTemplate(config Config) ([]byte, error) {
 	content, err := GetControllerChart()
 	if err != nil {
 		return nil, NewTemplateError(ErrorTypeIO, "failed to read controller template", err).
 			WithTemplate("controller/rendered.yaml")
 	}
-	// Controller template is static, no ytt processing needed
-	return []byte(content), nil
+
+	// Get the controller overlay
+	overlayContent, err := GetControllerOverlay()
+	if err != nil {
+		return nil, NewTemplateError(ErrorTypeIO, "failed to read controller overlay", err).
+			WithTemplate("controller/overlay.yaml")
+	}
+
+	// Build input files for ytt
+	var inputFiles []*files.File
+
+	templateFile := files.MustNewFileFromSource(
+		files.NewBytesSource("controller.yaml", []byte(content)),
+	)
+	inputFiles = append(inputFiles, templateFile)
+
+	overlayFile := files.MustNewFileFromSource(
+		files.NewBytesSource("overlay.yaml", []byte(overlayContent)),
+	)
+	inputFiles = append(inputFiles, overlayFile)
+
+	// Process with ytt library
+	return p.processWithYttLibrary(inputFiles, config)
 }
 
 // processScaleSetTemplate processes the scale-set template with ytt overlays

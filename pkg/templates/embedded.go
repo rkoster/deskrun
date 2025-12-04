@@ -68,6 +68,15 @@ func GetControllerChart() (string, error) {
 	return string(content), nil
 }
 
+// GetControllerOverlay returns the controller overlay file
+func GetControllerOverlay() (string, error) {
+	content, err := embeddedFS.ReadFile("templates/controller/overlay.yaml")
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
 // GetUniversalOverlay returns the universal overlay file that handles all container modes
 func GetUniversalOverlay() (string, error) {
 	content, err := embeddedFS.ReadFile("templates/overlay.yaml")

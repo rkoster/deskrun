@@ -11,6 +11,7 @@ import (
 	"github.com/rkoster/deskrun/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestMatrix defines comprehensive test cases for all container modes and configurations
@@ -314,6 +315,97 @@ func TestContainerModeSpecificFeatures(t *testing.T) {
 		assert.Contains(t, yamlStr, "ACTIONS_RUNNER_CONTAINER_HOOKS",
 			"Privileged mode should set container hooks")
 	})
+}
+
+func TestControllerOverlayAddsRBACPermissions(t *testing.T) {
+	processor := NewProcessor()
+
+	// Process controller template (which applies the overlay)
+	config := Config{
+		Installation: &types.RunnerInstallation{
+			Name:          "test-runner",
+			Repository:    "https://github.com/test/repo",
+			AuthValue:     "test-token",
+			ContainerMode: types.ContainerModeKubernetes,
+		},
+		InstanceName: "test-runner",
+		InstanceNum:  1,
+	}
+
+	processedYAML, err := processor.ProcessTemplate(TemplateTypeController, config)
+	require.NoError(t, err, "ProcessTemplate should not return an error")
+	require.NotEmpty(t, processedYAML, "Output should not be empty")
+
+	yamlStr := string(processedYAML)
+
+	// The controller needs to create roles and rolebindings dynamically for listener pods
+	// Verify the ClusterRole has the required RBAC permissions
+
+	// Check that roles resource has create, delete, get verbs
+	// The overlay should add these permissions to the arc-controller-gha-rs-controller ClusterRole
+	assert.Contains(t, yamlStr, "kind: ClusterRole", "Should contain ClusterRole")
+
+	// Parse YAML to verify specific permissions on roles and rolebindings
+	// We need to verify the ClusterRole rules include create/delete for roles and rolebindings
+	type Rule struct {
+		APIGroups []string `yaml:"apiGroups"`
+		Resources []string `yaml:"resources"`
+		Verbs     []string `yaml:"verbs"`
+	}
+	type ClusterRole struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+		Rules []Rule `yaml:"rules"`
+	}
+
+	// Split into documents and find the ClusterRole
+	docs := strings.Split(yamlStr, "---")
+	var controllerClusterRole *ClusterRole
+
+	for _, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+		if strings.Contains(doc, "kind: ClusterRole") && strings.Contains(doc, "name: arc-controller-gha-rs-controller") {
+			var cr ClusterRole
+			err := yaml.Unmarshal([]byte(doc), &cr)
+			require.NoError(t, err, "Failed to parse ClusterRole")
+			controllerClusterRole = &cr
+			break
+		}
+	}
+
+	require.NotNil(t, controllerClusterRole, "Should find arc-controller-gha-rs-controller ClusterRole")
+
+	// Find rules for roles and rolebindings
+	var rolesRule, rolebindingsRule *Rule
+	for i := range controllerClusterRole.Rules {
+		rule := &controllerClusterRole.Rules[i]
+		for _, resource := range rule.Resources {
+			if resource == "roles" {
+				rolesRule = rule
+			}
+			if resource == "rolebindings" {
+				rolebindingsRule = rule
+			}
+		}
+	}
+
+	require.NotNil(t, rolesRule, "Should have a rule for 'roles' resource")
+	require.NotNil(t, rolebindingsRule, "Should have a rule for 'rolebindings' resource")
+
+	// Verify roles has create, delete, get verbs (required for controller to manage listener roles)
+	assert.Contains(t, rolesRule.Verbs, "create", "roles rule should have 'create' verb")
+	assert.Contains(t, rolesRule.Verbs, "delete", "roles rule should have 'delete' verb")
+	assert.Contains(t, rolesRule.Verbs, "get", "roles rule should have 'get' verb")
+
+	// Verify rolebindings has create, delete, get verbs
+	assert.Contains(t, rolebindingsRule.Verbs, "create", "rolebindings rule should have 'create' verb")
+	assert.Contains(t, rolebindingsRule.Verbs, "delete", "rolebindings rule should have 'delete' verb")
+	assert.Contains(t, rolebindingsRule.Verbs, "get", "rolebindings rule should have 'get' verb")
 }
 
 func TestGetRawTemplate(t *testing.T) {
