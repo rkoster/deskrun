@@ -188,8 +188,8 @@ func (c *Client) Inspect(appName string) (string, error) {
 	return outBuf.String(), nil
 }
 
-// InspectWithStatus inspects a kapp app with status information
-func (c *Client) InspectWithStatus(appName string) (string, error) {
+// InspectWithTree inspects a kapp app with tree output showing resource hierarchy
+func (c *Client) InspectWithTree(appName string) (string, error) {
 	// Create a buffer to capture output
 	var outBuf, errBuf bytes.Buffer
 	confUI := ui.NewConfUI(ui.NewNoopLogger())
@@ -204,7 +204,7 @@ func (c *Client) InspectWithStatus(appName string) (string, error) {
 		"-a", appName,
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
-		"--status",
+		"--tree",
 	})
 
 	// Capture output
