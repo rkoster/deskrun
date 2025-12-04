@@ -187,3 +187,34 @@ func (c *Client) Inspect(appName string) (string, error) {
 
 	return outBuf.String(), nil
 }
+
+// InspectWithStatus inspects a kapp app with status information
+func (c *Client) InspectWithStatus(appName string) (string, error) {
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+
+	// Create the kapp command
+	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
+
+	// Set the command args
+	kappCommand.SetArgs([]string{
+		"inspect",
+		"-a", appName,
+		"--kubeconfig-context", c.kubeconfig,
+		"-n", c.namespace,
+		"--status",
+	})
+
+	// Capture output
+	kappCommand.SetOut(&outBuf)
+	kappCommand.SetErr(&errBuf)
+
+	// Execute the command
+	if err := kappCommand.Execute(); err != nil {
+		return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
+	}
+
+	return outBuf.String(), nil
+}

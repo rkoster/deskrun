@@ -472,7 +472,7 @@ func (m *Manager) Status(ctx context.Context, name string) (string, error) {
 	kappClient := m.getKappClient()
 
 	// First try single instance (name as-is)
-	inspectOutput, err := kappClient.Inspect(name)
+	inspectOutput, err := kappClient.InspectWithStatus(name)
 	if err == nil {
 		// Single instance found
 		statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
@@ -536,7 +536,7 @@ func (m *Manager) Status(ctx context.Context, name string) (string, error) {
 	for _, instanceName := range instanceNames {
 		results = append(results, fmt.Sprintf("=== Instance: %s ===", instanceName))
 
-		inspectOutput, err := kappClient.Inspect(instanceName)
+		inspectOutput, err := kappClient.InspectWithStatus(instanceName)
 		if err != nil {
 			results = append(results, fmt.Sprintf("Error inspecting %s: %v", instanceName, err))
 			continue
