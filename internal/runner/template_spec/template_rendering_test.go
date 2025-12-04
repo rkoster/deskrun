@@ -179,8 +179,9 @@ var _ = Describe("ARC Template Processing", func() {
 					"serviceAccountName: test-runner-gha-rs-"+expectedSARef),
 					"Expected serviceAccountName reference not found")
 			},
-			Entry("kubernetes mode uses manager SA", types.ContainerModeKubernetes, "manager"),
-			Entry("privileged mode uses manager SA", types.ContainerModePrivileged, "manager"),
+			// Upstream Helm charts now use kube-mode service account for kubernetes and privileged modes
+			Entry("kubernetes mode uses kube-mode SA", types.ContainerModeKubernetes, "kube-mode"),
+			Entry("privileged mode uses kube-mode SA", types.ContainerModePrivileged, "kube-mode"),
 			Entry("dind mode uses no-permission SA", types.ContainerModeDinD, "no-permission"),
 		)
 	})

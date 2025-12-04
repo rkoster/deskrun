@@ -35,9 +35,9 @@ build-all:
 	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 ./cmd/deskrun
 	GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-darwin-arm64 ./cmd/deskrun
 
-# Run tests
+# Run tests (excludes upstream/ which contains vendored helm chart tests with external dependencies)
 test:
-	go test -v ./...
+	go test -v ./cmd/... ./internal/... ./pkg/...
 
 # Clean build artifacts
 clean:
@@ -95,43 +95,30 @@ runner-update:
 	echo "" && \
 	echo "Runner updated successfully!"
 
-# Vendor ARC charts by rendering them with Helm
+# Vendor ARC charts using vendir and render them with Helm
 vendor-charts:
-	@echo "Downloading and extracting ARC controller chart v0.13.0..."
-	@rm -rf /tmp/arc-controller-chart
-	@mkdir -p /tmp/arc-controller-chart
-	@helm pull oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-		--version 0.13.0 \
-		--untar \
-		--untardir /tmp/arc-controller-chart
+	@echo "Syncing upstream helm charts using vendir..."
+	vendir sync
 	@echo ""
-	@echo "Rendering ARC controller chart v0.13.0..."
+	@echo "Rendering ARC controller chart..."
 	@mkdir -p pkg/templates/templates/controller
-	@helm template arc-controller \
-		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-		--version 0.13.0 \
+	@helm template arc-controller ./upstream/gha-runner-scale-set-controller \
 		--namespace arc-systems \
 		> pkg/templates/templates/controller/rendered.yaml
 	@echo "ARC controller chart rendered to pkg/templates/templates/controller/rendered.yaml"
 	@echo ""
 	@echo "Adding CRDs to controller chart..."
 	@echo "---" >> pkg/templates/templates/controller/rendered.yaml
-	@cat /tmp/arc-controller-chart/gha-runner-scale-set-controller/crds/*.yaml >> pkg/templates/templates/controller/rendered.yaml
+	@cat ./upstream/gha-runner-scale-set-controller/crds/*.yaml >> pkg/templates/templates/controller/rendered.yaml
 	@echo "CRDs added to pkg/templates/templates/controller/rendered.yaml"
 	@echo ""
-	@echo "Rendering ARC scale-set chart v0.13.0..."
-	@mkdir -p pkg/templates/templates/scale-set
-	@helm template arc-runner \
-		oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
-		--version 0.13.0 \
-		--namespace arc-systems \
-		--set githubConfigUrl=https://github.com/example/repo \
-		--set githubConfigSecret.github_token=placeholder \
-		--set controllerServiceAccount.name=arc-gha-rs-controller \
-		--set controllerServiceAccount.namespace=arc-systems \
-		> pkg/templates/templates/scale-set/rendered.yaml
-	@echo "ARC scale-set chart rendered to pkg/templates/templates/scale-set/rendered.yaml"
+	@echo "Generating base templates for scale-set..."
+	@./scripts/generate-base-templates.sh
 	@echo ""
-	@echo "Cleaning up temporary files..."
-	@rm -rf /tmp/arc-controller-chart
-	@echo "Charts rendered successfully! These files are now ready to be used with ytt overlays."
+	@echo "Updating test expected files..."
+	@ACCEPT_DIFF=true go test ./internal/runner/template_spec/... ./pkg/templates/...
+	@echo ""
+	@echo "Charts synced and base templates generated successfully!"
+	@echo "  - Raw helm charts: upstream/"
+	@echo "  - Controller template: pkg/templates/templates/controller/rendered.yaml"
+	@echo "  - Scale-set base templates: pkg/templates/templates/scale-set/bases/"

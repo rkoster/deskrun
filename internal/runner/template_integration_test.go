@@ -46,7 +46,8 @@ func TestFullYttProcessing(t *testing.T) {
 
 	// Check that values have been substituted correctly
 	assert.Contains(t, resultStr, "test-runner-gha-rs-github-secret")
-	assert.Contains(t, resultStr, "test-runner-gha-rs-no-permission")
+	// Privileged mode uses kube-mode service account (for kubernetes hooks)
+	assert.Contains(t, resultStr, "test-runner-gha-rs-kube-mode")
 	assert.Contains(t, resultStr, "test-runner-gha-rs-manager")
 	assert.Contains(t, resultStr, "https://github.com/test/repo")
 
@@ -84,11 +85,15 @@ func TestYttProcessingForDifferentContainerModes(t *testing.T) {
 			expectStrings: []string{
 				"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER",
 				"value: \"true\"",
+				// Upstream kubernetes mode includes container hooks
+				"ACTIONS_RUNNER_CONTAINER_HOOKS",
+				"/home/runner/k8s/index.js",
 			},
 			rejectStrings: []string{
 				"privileged: true",
 				"DOCKER_HOST",
-				"ACTIONS_RUNNER_CONTAINER_HOOKS",
+				// Should not have novolume hooks
+				"k8s-novolume",
 			},
 		},
 		{
@@ -96,7 +101,7 @@ func TestYttProcessingForDifferentContainerModes(t *testing.T) {
 			containerMode: types.ContainerModeDinD,
 			expectStrings: []string{
 				"DOCKER_HOST",
-				"tcp://localhost:2375",
+				"unix:///var/run/docker.sock",
 				"docker:dind",
 				"emptyDir: {}",
 			},
@@ -108,8 +113,6 @@ func TestYttProcessingForDifferentContainerModes(t *testing.T) {
 			name:          "cached-privileged-kubernetes mode",
 			containerMode: types.ContainerModePrivileged,
 			expectStrings: []string{
-				// Container mode should be kubernetes-novolume
-				"type: kubernetes-novolume",
 				// Runner container security context (PRIVILEGED)
 				"privileged: true",
 				"allowPrivilegeEscalation: true",

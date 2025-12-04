@@ -157,7 +157,7 @@ var _ = Describe("ytt Overlay Processing", func() {
 					envMap := envVar.(map[string]interface{})
 					if envMap["name"] == "DOCKER_HOST" {
 						hasDockerHost = true
-						Expect(envMap["value"]).To(Equal("tcp://localhost:2375"))
+						Expect(envMap["value"]).To(Equal("unix:///var/run/docker.sock"))
 					}
 				}
 				Expect(hasDockerHost).To(BeTrue(), "Should have DOCKER_HOST environment variable")
@@ -165,18 +165,30 @@ var _ = Describe("ytt Overlay Processing", func() {
 				// Verify runner container volume mounts
 				volumeMounts := runnerContainer["volumeMounts"].([]interface{})
 				hasWorkMount := false
+				hasDindSockMount := false
 				for _, mount := range volumeMounts {
 					mountMap := mount.(map[string]interface{})
 					if mountMap["name"] == "work" && mountMap["mountPath"] == "/home/runner/_work" {
 						hasWorkMount = true
 					}
+					if mountMap["name"] == "dind-sock" && mountMap["mountPath"] == "/var/run" {
+						hasDindSockMount = true
+					}
 				}
 				Expect(hasWorkMount).To(BeTrue(), "Should have work volume mount")
+				Expect(hasDindSockMount).To(BeTrue(), "Should have dind-sock volume mount for unix socket")
 
-				// Verify DinD container exists
-				Expect(len(containers)).To(Equal(2), "Should have both runner and dind containers")
-				dindContainer := containers[1].(map[string]interface{})
-				Expect(dindContainer["name"]).To(Equal("dind"))
+				// Verify DinD init container exists (upstream uses native sidecar pattern with initContainers)
+				initContainers := podSpec["initContainers"].([]interface{})
+				var dindContainer map[string]interface{}
+				for _, ic := range initContainers {
+					icMap := ic.(map[string]interface{})
+					if icMap["name"] == "dind" {
+						dindContainer = icMap
+						break
+					}
+				}
+				Expect(dindContainer).NotTo(BeNil(), "Should have dind init container")
 				Expect(dindContainer["image"]).To(Equal("docker:dind"))
 
 				// Verify DinD container security context
@@ -185,7 +197,7 @@ var _ = Describe("ytt Overlay Processing", func() {
 
 				// Verify volumes
 				volumes := podSpec["volumes"].([]interface{})
-				expectedVolumes := []string{"work", "dind-storage"}
+				expectedVolumes := []string{"work", "dind-sock", "dind-externals"}
 				actualVolumeNames := make([]string, len(volumes))
 				for i, vol := range volumes {
 					volMap := vol.(map[string]interface{})
@@ -526,64 +538,125 @@ var _ = Describe("ytt Overlay Processing", func() {
 				Expect(fieldPath).To(Equal("metadata.name"), "ACTIONS_RUNNER_POD_NAME should use metadata.name fieldRef")
 			})
 
-			It("should not set ACTIONS_RUNNER_POD_NAME for non-cached-privileged-kubernetes modes", func() {
-				nonCachedModes := []types.ContainerMode{types.ContainerModeKubernetes, types.ContainerModeDinD}
+			It("should have ACTIONS_RUNNER_POD_NAME for kubernetes mode (upstream default)", func() {
+				// NOTE: Upstream kubernetes mode now includes ACTIONS_RUNNER_POD_NAME by default
+				// This is expected behavior from the Helm template
+				installation := &types.RunnerInstallation{
+					Name:          "test-no-podname",
+					Repository:    "https://github.com/test/repo",
+					AuthType:      types.AuthTypePAT,
+					AuthValue:     "test-token",
+					ContainerMode: types.ContainerModeKubernetes,
+					CachePaths:    []types.CachePath{},
+					MinRunners:    1,
+					MaxRunners:    3,
+				}
 
-				for _, mode := range nonCachedModes {
-					installation := &types.RunnerInstallation{
-						Name:          "test-no-podname",
-						Repository:    "https://github.com/test/repo",
-						AuthType:      types.AuthTypePAT,
-						AuthValue:     "test-token",
-						ContainerMode: mode,
-						CachePaths:    []types.CachePath{},
-						MinRunners:    1,
-						MaxRunners:    3,
+				config := templates.Config{
+					Installation: installation,
+					InstanceName: "test-no-podname",
+					InstanceNum:  0,
+				}
+
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+				Expect(err).NotTo(HaveOccurred())
+
+				var resources []map[string]interface{}
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
+				for {
+					var resource map[string]interface{}
+					if err := decoder.Decode(&resource); err != nil {
+						break
 					}
-
-					config := templates.Config{
-						Installation: installation,
-						InstanceName: "test-no-podname",
-						InstanceNum:  0,
+					if resource != nil {
+						resources = append(resources, resource)
 					}
+				}
 
-					processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
-					Expect(err).NotTo(HaveOccurred())
-
-					var resources []map[string]interface{}
-					decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
-					for {
-						var resource map[string]interface{}
-						if err := decoder.Decode(&resource); err != nil {
-							break
-						}
-						if resource != nil {
-							resources = append(resources, resource)
-						}
+				var autoscalingRunnerSet map[string]interface{}
+				for _, resource := range resources {
+					if resource["kind"] == "AutoscalingRunnerSet" {
+						autoscalingRunnerSet = resource
+						break
 					}
+				}
+				Expect(autoscalingRunnerSet).NotTo(BeNil())
 
-					var autoscalingRunnerSet map[string]interface{}
-					for _, resource := range resources {
-						if resource["kind"] == "AutoscalingRunnerSet" {
-							autoscalingRunnerSet = resource
-							break
-						}
+				spec := autoscalingRunnerSet["spec"].(map[string]interface{})
+				template := spec["template"].(map[string]interface{})
+				podSpec := template["spec"].(map[string]interface{})
+				containers := podSpec["containers"].([]interface{})
+
+				runnerContainer := containers[0].(map[string]interface{})
+				env := runnerContainer["env"].([]interface{})
+
+				// Kubernetes mode should have ACTIONS_RUNNER_POD_NAME (upstream default)
+				var podNameEnv map[string]interface{}
+				for _, envVar := range env {
+					envMap := envVar.(map[string]interface{})
+					if envMap["name"] == "ACTIONS_RUNNER_POD_NAME" {
+						podNameEnv = envMap
+						break
 					}
-					Expect(autoscalingRunnerSet).NotTo(BeNil())
+				}
+				Expect(podNameEnv).NotTo(BeNil(), "ACTIONS_RUNNER_POD_NAME should be present for kubernetes mode (upstream default)")
+			})
 
-					spec := autoscalingRunnerSet["spec"].(map[string]interface{})
-					template := spec["template"].(map[string]interface{})
-					podSpec := template["spec"].(map[string]interface{})
-					containers := podSpec["containers"].([]interface{})
+			It("should not have ACTIONS_RUNNER_POD_NAME for dind mode", func() {
+				installation := &types.RunnerInstallation{
+					Name:          "test-no-podname",
+					Repository:    "https://github.com/test/repo",
+					AuthType:      types.AuthTypePAT,
+					AuthValue:     "test-token",
+					ContainerMode: types.ContainerModeDinD,
+					CachePaths:    []types.CachePath{},
+					MinRunners:    1,
+					MaxRunners:    3,
+				}
 
-					runnerContainer := containers[0].(map[string]interface{})
-					env := runnerContainer["env"].([]interface{})
+				config := templates.Config{
+					Installation: installation,
+					InstanceName: "test-no-podname",
+					InstanceNum:  0,
+				}
 
-					for _, envVar := range env {
-						envMap := envVar.(map[string]interface{})
-						Expect(envMap["name"]).NotTo(Equal("ACTIONS_RUNNER_POD_NAME"),
-							"ACTIONS_RUNNER_POD_NAME should not be present for mode: %s", mode)
+				processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+				Expect(err).NotTo(HaveOccurred())
+
+				var resources []map[string]interface{}
+				decoder := yaml.NewDecoder(strings.NewReader(string(processedYAML)))
+				for {
+					var resource map[string]interface{}
+					if err := decoder.Decode(&resource); err != nil {
+						break
 					}
+					if resource != nil {
+						resources = append(resources, resource)
+					}
+				}
+
+				var autoscalingRunnerSet map[string]interface{}
+				for _, resource := range resources {
+					if resource["kind"] == "AutoscalingRunnerSet" {
+						autoscalingRunnerSet = resource
+						break
+					}
+				}
+				Expect(autoscalingRunnerSet).NotTo(BeNil())
+
+				spec := autoscalingRunnerSet["spec"].(map[string]interface{})
+				template := spec["template"].(map[string]interface{})
+				podSpec := template["spec"].(map[string]interface{})
+				containers := podSpec["containers"].([]interface{})
+
+				runnerContainer := containers[0].(map[string]interface{})
+				env := runnerContainer["env"].([]interface{})
+
+				// DinD mode should NOT have ACTIONS_RUNNER_POD_NAME
+				for _, envVar := range env {
+					envMap := envVar.(map[string]interface{})
+					Expect(envMap["name"]).NotTo(Equal("ACTIONS_RUNNER_POD_NAME"),
+						"ACTIONS_RUNNER_POD_NAME should not be present for dind mode")
 				}
 			})
 

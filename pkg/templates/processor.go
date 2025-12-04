@@ -10,7 +10,6 @@ import (
 	cmdtpl "github.com/k14s/ytt/pkg/cmd/template"
 	"github.com/k14s/ytt/pkg/cmd/ui"
 	"github.com/k14s/ytt/pkg/files"
-	"github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,6 +41,7 @@ func (p *Processor) ProcessTemplate(templateType TemplateType, config Config) ([
 }
 
 // GetRawTemplate returns the raw template content without processing
+// For scale-set templates, this returns the kubernetes base template as the default
 func (p *Processor) GetRawTemplate(templateType TemplateType) ([]byte, error) {
 	switch templateType {
 	case TemplateTypeController:
@@ -51,7 +51,8 @@ func (p *Processor) GetRawTemplate(templateType TemplateType) ([]byte, error) {
 		}
 		return []byte(content), nil
 	case TemplateTypeScaleSet:
-		content, err := GetScaleSetChart()
+		// Return the kubernetes base template as the default raw template
+		content, err := GetScaleSetBase("kubernetes")
 		if err != nil {
 			return nil, NewTemplateError(ErrorTypeIO, "failed to read scale-set template", err)
 		}
@@ -89,11 +90,11 @@ func (p *Processor) processScaleSetTemplate(config Config) ([]byte, error) {
 func (p *Processor) buildInputFiles(config Config) ([]*files.File, error) {
 	var inputFiles []*files.File
 
-	// 1. Get the base scale-set template and transform it for ytt
-	scaleSetContent, err := GetScaleSetChart()
+	// 1. Get the base scale-set template based on container mode (runtime selection)
+	scaleSetContent, err := GetScaleSetBase(config.Installation.ContainerMode)
 	if err != nil {
-		return nil, NewTemplateError(ErrorTypeIO, "failed to read scale-set template", err).
-			WithTemplate("scale-set/rendered.yaml")
+		return nil, NewTemplateError(ErrorTypeIO, "failed to read scale-set base template", err).
+			WithTemplate(fmt.Sprintf("scale-set/bases/%s.yaml", config.Installation.ContainerMode))
 	}
 
 	// Transform static values to ytt data value expressions
@@ -104,7 +105,7 @@ func (p *Processor) buildInputFiles(config Config) ([]*files.File, error) {
 	)
 	inputFiles = append(inputFiles, templateFile)
 
-	// 2. Add the universal overlay (which handles ALL container modes via conditionals)
+	// 2. Add the universal overlay (deskrun-specific customizations only)
 	overlayContent, err := GetUniversalOverlay()
 	if err != nil {
 		return nil, NewTemplateError(ErrorTypeIO, "failed to read universal overlay", err).
@@ -115,12 +116,6 @@ func (p *Processor) buildInputFiles(config Config) ([]*files.File, error) {
 		files.NewBytesSource("overlay.yaml", []byte(overlayContent)),
 	)
 	inputFiles = append(inputFiles, overlayFile)
-
-	// Note: Container mode specific overlays are NOT used because the universal
-	// overlay contains all container mode logic via ytt conditionals.
-	// The container-mode-specific overlays in templates/overlays/ are kept for
-	// reference and potential future use, but they conflict with the string
-	// transformation approach used here.
 
 	// 3. Create data values file
 	dataValuesYAML, err := p.buildDataValues(config)
@@ -145,6 +140,7 @@ func (p *Processor) transformTemplateForYtt(templateContent string) string {
 	result = strings.ReplaceAll(result, "arc-runner-gha-rs-github-secret", "#@ data.values.installation.name + \"-gha-rs-github-secret\"")
 	result = strings.ReplaceAll(result, "arc-runner-gha-rs-no-permission", "#@ data.values.installation.name + \"-gha-rs-no-permission\"")
 	result = strings.ReplaceAll(result, "arc-runner-gha-rs-manager", "#@ data.values.installation.name + \"-gha-rs-manager\"")
+	result = strings.ReplaceAll(result, "arc-runner-gha-rs-kube-mode", "#@ data.values.installation.name + \"-gha-rs-kube-mode\"")
 
 	// Replace remaining arc-runner references (labels, names, etc.)
 	result = strings.ReplaceAll(result, "\"arc-runner\"", "#@ data.values.installation.name")
@@ -156,30 +152,6 @@ func (p *Processor) transformTemplateForYtt(templateContent string) string {
 	result = "#@ load(\"@ytt:data\", \"data\")\n#@ load(\"@ytt:base64\", \"base64\")\n" + result
 
 	return result
-}
-
-// getContainerModeOverlay returns the overlay content for the given container mode
-func (p *Processor) getContainerModeOverlay(mode types.ContainerMode) (string, string, error) {
-	var overlayFile string
-	switch mode {
-	case types.ContainerModeDinD:
-		overlayFile = "container-mode-dind.yaml"
-	case types.ContainerModeKubernetes:
-		overlayFile = "container-mode-kubernetes.yaml"
-	case types.ContainerModePrivileged:
-		overlayFile = "container-mode-privileged.yaml"
-	default:
-		return "", "", nil // No overlay needed
-	}
-
-	content, err := GetOverlay(overlayFile)
-	if err != nil {
-		return "", "", NewTemplateError(ErrorTypeIO,
-			fmt.Sprintf("failed to read overlay %s", overlayFile), err).
-			WithTemplate(overlayFile)
-	}
-
-	return content, overlayFile, nil
 }
 
 // buildDataValues creates the ytt data values YAML from the configuration

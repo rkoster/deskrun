@@ -2,8 +2,11 @@ package templates
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+
+	"github.com/rkoster/deskrun/pkg/types"
 )
 
 // Embedded ARC templates using ytt format
@@ -65,24 +68,6 @@ func GetControllerChart() (string, error) {
 	return string(content), nil
 }
 
-// GetScaleSetChart returns the scale-set chart YAML
-func GetScaleSetChart() (string, error) {
-	content, err := embeddedFS.ReadFile("templates/scale-set/rendered.yaml")
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
-}
-
-// GetOverlay returns the specified overlay file content
-func GetOverlay(filename string) (string, error) {
-	content, err := embeddedFS.ReadFile("templates/overlays/" + filename)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
-}
-
 // GetUniversalOverlay returns the universal overlay file that handles all container modes
 func GetUniversalOverlay() (string, error) {
 	content, err := embeddedFS.ReadFile("templates/overlay.yaml")
@@ -97,6 +82,28 @@ func GetSchema() (string, error) {
 	content, err := embeddedFS.ReadFile("templates/values/schema.yaml")
 	if err != nil {
 		return "", err
+	}
+	return string(content), nil
+}
+
+// GetScaleSetBase returns the base template for the specified container mode.
+// This enables runtime selection of the appropriate helm-rendered template.
+func GetScaleSetBase(containerMode types.ContainerMode) (string, error) {
+	var basePath string
+	switch containerMode {
+	case types.ContainerModeKubernetes:
+		basePath = "templates/scale-set/bases/kubernetes.yaml"
+	case types.ContainerModeDinD:
+		basePath = "templates/scale-set/bases/dind.yaml"
+	case types.ContainerModePrivileged:
+		basePath = "templates/scale-set/bases/privileged.yaml"
+	default:
+		return "", fmt.Errorf("unknown container mode: %s", containerMode)
+	}
+
+	content, err := embeddedFS.ReadFile(basePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read base template %s: %w", basePath, err)
 	}
 	return string(content), nil
 }

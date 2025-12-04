@@ -197,25 +197,27 @@ func TestServiceAccountLogic(t *testing.T) {
 		shouldHaveManagerRBAC bool
 	}{
 		{
-			name:                  "kubernetes-uses-manager",
+			// Upstream Helm charts now use kube-mode service account for kubernetes mode
+			name:                  "kubernetes-uses-kube-mode",
 			containerMode:         types.ContainerModeKubernetes,
-			expectedSAType:        "manager",
-			shouldHaveManagerSA:   true,
-			shouldHaveManagerRBAC: true,
+			expectedSAType:        "kube-mode",
+			shouldHaveManagerSA:   false, // No longer creates separate manager SA
+			shouldHaveManagerRBAC: true,  // Manager Role/RoleBinding still exist
 		},
 		{
-			name:                  "privileged-uses-manager",
+			// Upstream Helm charts now use kube-mode service account for privileged mode
+			name:                  "privileged-uses-kube-mode",
 			containerMode:         types.ContainerModePrivileged,
-			expectedSAType:        "manager",
-			shouldHaveManagerSA:   true,
-			shouldHaveManagerRBAC: true,
+			expectedSAType:        "kube-mode",
+			shouldHaveManagerSA:   false, // No longer creates separate manager SA
+			shouldHaveManagerRBAC: true,  // Manager Role/RoleBinding still exist
 		},
 		{
 			name:                  "dind-uses-no-permission",
 			containerMode:         types.ContainerModeDinD,
 			expectedSAType:        "no-permission",
-			shouldHaveManagerSA:   false, // DinD mode removes manager SA
-			shouldHaveManagerRBAC: false,
+			shouldHaveManagerSA:   false, // DinD mode uses no-permission SA
+			shouldHaveManagerRBAC: true,  // Manager Role/RoleBinding still exist
 		},
 	}
 
@@ -343,10 +345,12 @@ func TestEmbeddedTemplates(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, files)
 
-		// Check required files exist
+		// Check required files exist (new structure with base templates)
 		requiredFiles := []string{
 			"controller/rendered.yaml",
-			"scale-set/rendered.yaml",
+			"scale-set/bases/kubernetes.yaml",
+			"scale-set/bases/dind.yaml",
+			"scale-set/bases/privileged.yaml",
 			"overlay.yaml",
 			"values/schema.yaml",
 		}
@@ -362,10 +366,17 @@ func TestEmbeddedTemplates(t *testing.T) {
 		assert.NotEmpty(t, content)
 	})
 
-	t.Run("GetScaleSetChart", func(t *testing.T) {
-		content, err := GetScaleSetChart()
-		require.NoError(t, err)
-		assert.NotEmpty(t, content)
+	t.Run("GetScaleSetBase for each mode", func(t *testing.T) {
+		modes := []types.ContainerMode{
+			types.ContainerModeKubernetes,
+			types.ContainerModeDinD,
+			types.ContainerModePrivileged,
+		}
+		for _, mode := range modes {
+			content, err := GetScaleSetBase(mode)
+			require.NoError(t, err, "Failed to get base template for mode %s", mode)
+			assert.NotEmpty(t, content, "Base template for mode %s is empty", mode)
+		}
 	})
 
 	t.Run("GetUniversalOverlay", func(t *testing.T) {
@@ -373,19 +384,6 @@ func TestEmbeddedTemplates(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, content)
 		assert.Contains(t, content, "@ytt:overlay")
-	})
-
-	t.Run("GetOverlay for each mode", func(t *testing.T) {
-		overlays := []string{
-			"container-mode-dind.yaml",
-			"container-mode-kubernetes.yaml",
-			"container-mode-privileged.yaml",
-		}
-		for _, overlay := range overlays {
-			content, err := GetOverlay(overlay)
-			require.NoError(t, err, "Failed to get overlay %s", overlay)
-			assert.NotEmpty(t, content, "Overlay %s is empty", overlay)
-		}
 	})
 }
 
