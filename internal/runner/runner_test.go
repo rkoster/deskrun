@@ -7,7 +7,7 @@ import (
 	"github.com/rkoster/deskrun/pkg/types"
 )
 
-func TestGenerateHelmValues_RepositoryLevel(t *testing.T) {
+func TestGenerateYTTDataValues_RepositoryLevel(t *testing.T) {
 	tests := []struct {
 		name            string
 		installation    *types.RunnerInstallation
@@ -69,23 +69,23 @@ func TestGenerateHelmValues_RepositoryLevel(t *testing.T) {
 			if tt.instanceNum > 0 {
 				instanceName = tt.installation.Name + "-" + string(rune('0'+tt.instanceNum))
 			}
-			got, err := m.generateHelmValues(tt.installation, instanceName, tt.instanceNum)
+			got, err := m.generateYTTDataValues(tt.installation, instanceName, tt.instanceNum)
 			if err != nil {
-				t.Fatalf("generateHelmValues() error = %v", err)
+				t.Fatalf("generateYTTDataValues() error = %v", err)
 			}
 
 			if tt.wantContains != "" && !strings.Contains(got, tt.wantContains) {
-				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantContains, got)
+				t.Errorf("generateYTTDataValues() output does not contain %q\nGot:\n%s", tt.wantContains, got)
 			}
 
 			if tt.wantNotContains != "" && strings.Contains(got, tt.wantNotContains) {
-				t.Errorf("generateHelmValues() output should not contain %q\nGot:\n%s", tt.wantNotContains, got)
+				t.Errorf("generateYTTDataValues() output should not contain %q\nGot:\n%s", tt.wantNotContains, got)
 			}
 		})
 	}
 }
 
-func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
+func TestGenerateYTTDataValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	installation := &types.RunnerInstallation{
 		Name:          "shared-runner",
 		Repository:    "https://github.com/owner/repo",
@@ -103,9 +103,9 @@ func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	var values []string
 	for i := 1; i <= installation.Instances; i++ {
 		instanceName := installation.Name + "-" + string(rune('0'+i))
-		val, err := m.generateHelmValues(installation, instanceName, i)
+		val, err := m.generateYTTDataValues(installation, instanceName, i)
 		if err != nil {
-			t.Fatalf("generateHelmValues() instance %d error = %v", i, err)
+			t.Fatalf("generateYTTDataValues() instance %d error = %v", i, err)
 		}
 		values = append(values, val)
 	}
@@ -119,7 +119,7 @@ func TestGenerateHelmValues_NoRunnerGroupForRepoLevel(t *testing.T) {
 	}
 }
 
-func TestGenerateHelmValues_MinMaxRunners(t *testing.T) {
+func TestGenerateYTTDataValues_MinMaxRunners(t *testing.T) {
 	tests := []struct {
 		name           string
 		minRunners     int
@@ -163,17 +163,100 @@ func TestGenerateHelmValues_MinMaxRunners(t *testing.T) {
 			}
 
 			m := &Manager{}
-			got, err := m.generateHelmValues(installation, "test-runner-1", 1)
+			got, err := m.generateYTTDataValues(installation, "test-runner-1", 1)
 			if err != nil {
-				t.Fatalf("generateHelmValues() error = %v", err)
+				t.Fatalf("generateYTTDataValues() error = %v", err)
 			}
 
 			if !strings.Contains(got, tt.wantMinRunners) {
-				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantMinRunners, got)
+				t.Errorf("generateYTTDataValues() output does not contain %q\nGot:\n%s", tt.wantMinRunners, got)
 			}
 
 			if !strings.Contains(got, tt.wantMaxRunners) {
-				t.Errorf("generateHelmValues() output does not contain %q\nGot:\n%s", tt.wantMaxRunners, got)
+				t.Errorf("generateYTTDataValues() output does not contain %q\nGot:\n%s", tt.wantMaxRunners, got)
+			}
+		})
+	}
+}
+
+func TestGenerateHookExtensionConfigMap(t *testing.T) {
+	tests := []struct {
+		name            string
+		installation    *types.RunnerInstallation
+		instanceName    string
+		instanceNum     int
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name: "basic hook extension for cached-privileged-kubernetes",
+			installation: &types.RunnerInstallation{
+				Name:          "test-runner",
+				Repository:    "https://github.com/owner/repo",
+				ContainerMode: types.ContainerModePrivileged,
+			},
+			instanceName: "test-runner-1",
+			instanceNum:  1,
+			wantContains: []string{
+				"apiVersion: v1",
+				"kind: ConfigMap",
+				"name: privileged-hook-extension-test-runner-1",
+				"namespace: arc-systems",
+				"data:",
+				"content: |",
+				"spec:",
+				"hostPID: true",
+				"hostIPC: true",
+				"runAsUser: 0",
+				"runAsGroup: 0",
+				"fsGroup: 0",
+				`name: "$job"`,
+				"privileged: true",
+				"capabilities:",
+				"add:",
+				"SYS_ADMIN",
+				"NET_ADMIN",
+				"SYS_PTRACE",
+				"mountPath: /sys",
+				"mountPath: /sys/fs/cgroup",
+				"mountPath: /proc",
+				"mountPath: /dev",
+				"mountPath: /dev/pts",
+				"mountPath: /dev/shm",
+				"hostPath:",
+				"path: /sys",
+				"path: /sys/fs/cgroup",
+				"path: /proc",
+				"path: /dev",
+				"path: /dev/pts",
+				"path: /dev/shm",
+				"type: Directory",
+			},
+			wantNotContains: []string{
+				// Hook extension should NOT contain runner-specific config
+				"ACTIONS_RUNNER_CONTAINER_HOOKS",
+				"runAsNonRoot: true",
+				// Should not duplicate volumes already in template
+				"work",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Manager{}
+			got := m.generateHookExtensionConfigMap(tt.installation, tt.instanceName, tt.instanceNum)
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("generateHookExtensionConfigMap() missing expected content %q", want)
+				}
+			}
+
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(got, notWant) {
+					t.Errorf("generateHookExtensionConfigMap() contains unexpected content %q", notWant)
+				}
 			}
 		})
 	}

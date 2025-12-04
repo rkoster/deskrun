@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/rkoster/deskrun/internal/cluster"
+	"github.com/rkoster/deskrun/internal/kapp"
+	"github.com/rkoster/deskrun/pkg/templates"
 	deskruntypes "github.com/rkoster/deskrun/pkg/types"
 	"gopkg.in/yaml.v3"
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/registry"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,13 +31,11 @@ import (
 )
 
 const (
-	defaultNamespace        = "arc-systems"
-	arcControllerNamespace  = "arc-systems"
-	arcControllerRelease    = "arc-controller"
-	arcControllerChartRepo  = "oci://ghcr.io/actions/actions-runner-controller-charts"
-	arcControllerChartName  = "gha-runner-scale-set-controller"
-	runnerScaleSetChartRepo = "oci://ghcr.io/actions/actions-runner-controller-charts"
-	runnerScaleSetChartName = "gha-runner-scale-set"
+	defaultNamespace       = "arc-systems"
+	arcControllerNamespace = "arc-systems"
+	arcControllerAppName   = "arc-controller"
+	// kapp app naming for runner scale sets
+	kappAppLabelKey = "kapp.k14s.io/app"
 )
 
 // Manager handles runner operations
@@ -50,6 +48,11 @@ func NewManager(clusterManager *cluster.Manager) *Manager {
 	return &Manager{
 		clusterManager: clusterManager,
 	}
+}
+
+// getKappClient returns a kapp client configured for the current cluster
+func (m *Manager) getKappClient() *kapp.Client {
+	return kapp.NewClient(m.clusterManager.GetKubeconfig(), defaultNamespace)
 }
 
 // customWarningHandler is a warning handler that filters out unrecognized format warnings
@@ -315,28 +318,6 @@ func (m *Manager) waitForCRD(ctx context.Context, crdName string) error {
 	})
 }
 
-// getHelmConfig creates a Helm action configuration
-func (m *Manager) getHelmConfig(namespace string) (*action.Configuration, error) {
-	settings := cli.New()
-	settings.KubeContext = m.clusterManager.GetKubeconfig()
-
-	actionConfig := new(action.Configuration)
-	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, "", func(format string, v ...interface{}) {
-		// Suppress Helm's default logger
-	}); err != nil {
-		return nil, err
-	}
-
-	// Configure registry client for OCI
-	registryClient, err := registry.NewClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create registry client: %w", err)
-	}
-	actionConfig.RegistryClient = registryClient
-
-	return actionConfig, nil
-}
-
 // Install installs a runner scale set
 func (m *Manager) Install(ctx context.Context, installation *deskruntypes.RunnerInstallation) error {
 	// Ensure cluster exists
@@ -382,9 +363,9 @@ func (m *Manager) Install(ctx context.Context, installation *deskruntypes.Runner
 	return nil
 }
 
-// installInstance installs a single runner scale set instance
+// installInstance installs a single runner scale set instance using the unified template processing package
 func (m *Manager) installInstance(ctx context.Context, installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) error {
-	// Create temporary directory for Helm values
+	// Create temporary directory for manifests
 	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
@@ -397,10 +378,6 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 	if installation.ContainerMode == deskruntypes.ContainerModePrivileged {
 		fmt.Printf("  Applying hook extension ConfigMap for privileged mode...\n")
 		hookExtension := m.generateHookExtensionConfigMap(installation, instanceName, instanceNum)
-		hookExtensionPath := filepath.Join(tmpDir, "hook-extension.yaml")
-		if err := os.WriteFile(hookExtensionPath, []byte(hookExtension), 0644); err != nil {
-			return fmt.Errorf("failed to write hook extension: %w", err)
-		}
 
 		// Apply the ConfigMap using Kubernetes client
 		if err := m.applyConfigMapFromYAML(ctx, hookExtension); err != nil {
@@ -408,67 +385,35 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 		}
 	}
 
-	// Prepare Helm values with instance-specific cache paths
-	valuesPath := filepath.Join(tmpDir, "values.yaml")
-	valuesContent, err := m.generateHelmValues(installation, instanceName, instanceNum)
+	// Use the unified template processing package (ytt Go library, no shell execution)
+	processor := templates.NewProcessor()
+	config := templates.Config{
+		Installation: installation,
+		InstanceName: instanceName,
+		InstanceNum:  instanceNum,
+		Namespace:    defaultNamespace,
+	}
+
+	processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 	if err != nil {
-		return fmt.Errorf("failed to generate helm values: %w", err)
-	}
-
-	if err := os.WriteFile(valuesPath, []byte(valuesContent), 0644); err != nil {
-		return fmt.Errorf("failed to write helm values: %w", err)
-	}
-
-	// Install using Helm SDK
-	actionConfig, err := m.getHelmConfig(defaultNamespace)
-	if err != nil {
-		return fmt.Errorf("failed to create helm config: %w", err)
-	}
-
-	client := action.NewInstall(actionConfig)
-	client.ReleaseName = instanceName
-	client.Namespace = defaultNamespace
-	client.Wait = true
-	client.Timeout = 5 * time.Minute
-	client.CreateNamespace = false // We create it separately
-
-	// Load the chart from OCI registry
-	chartPath := fmt.Sprintf("%s/%s", runnerScaleSetChartRepo, runnerScaleSetChartName)
-
-	chartRef, err := client.ChartPathOptions.LocateChart(chartPath, cli.New())
-	if err != nil {
-		return fmt.Errorf("failed to locate chart: %w", err)
-	}
-
-	chart, err := loader.Load(chartRef)
-	if err != nil {
-		return fmt.Errorf("failed to load chart: %w", err)
-	}
-
-	// Load values from file
-	vals := map[string]interface{}{}
-	if valuesContent, err := os.ReadFile(valuesPath); err == nil {
-		// Parse YAML values
-		if err := yaml.Unmarshal(valuesContent, &vals); err != nil {
-			return fmt.Errorf("failed to parse values: %w", err)
+		// Check if it's a TemplateError with verbose information
+		if templateErr, ok := err.(*templates.TemplateError); ok {
+			return fmt.Errorf("failed to process template: %s", templateErr.VerboseError())
 		}
-	} else {
-		return fmt.Errorf("failed to read values file: %w", err)
+		return fmt.Errorf("failed to process template: %w", err)
 	}
 
-	// Debug: Verify githubConfigSecret is present
-	if _, ok := vals["githubConfigSecret"]; !ok {
-		return fmt.Errorf("githubConfigSecret missing from values")
+	// Write processed YAML to file for kapp
+	manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+	if err := os.WriteFile(manifestPath, processedYAML, 0644); err != nil {
+		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 
-	_, err = client.Run(chart, vals)
-	if err != nil {
-		return fmt.Errorf("failed to install runner scale set: %w", err)
-	}
-
-	// Wait for the AutoscalingRunnerSet CRD to be available
-	if err := m.waitForCRD(ctx, "autoscalingrunnersets.actions.github.com"); err != nil {
-		return fmt.Errorf("failed to wait for ARS CRD: %w", err)
+	// Deploy using kapp
+	kappClient := m.getKappClient()
+	appName := instanceName
+	if err := kappClient.Deploy(appName, manifestPath); err != nil {
+		return fmt.Errorf("failed to deploy with kapp: %w", err)
 	}
 
 	fmt.Printf("  Instance '%s' installed successfully\n", instanceName)
@@ -477,17 +422,9 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 
 // Uninstall removes a runner scale set
 func (m *Manager) Uninstall(ctx context.Context, name string) error {
-	// Uninstall using Helm SDK
-	actionConfig, err := m.getHelmConfig(defaultNamespace)
-	if err != nil {
-		return fmt.Errorf("failed to create helm config: %w", err)
-	}
-
-	client := action.NewUninstall(actionConfig)
-	client.Timeout = 2 * time.Minute
-
-	_, err = client.Run(name)
-	if err != nil {
+	// Uninstall using kapp delete
+	kappClient := m.getKappClient()
+	if err := kappClient.Delete(name); err != nil {
 		return fmt.Errorf("failed to uninstall runner: %w", err)
 	}
 
@@ -496,55 +433,127 @@ func (m *Manager) Uninstall(ctx context.Context, name string) error {
 
 // List returns all runner scale sets
 func (m *Manager) List(ctx context.Context) ([]string, error) {
-	// List Helm releases using SDK
-	actionConfig, err := m.getHelmConfig(defaultNamespace)
+	// Instead of using kapp list, query AutoscalingRunnerSet resources directly
+	// since they represent our deployed runners
+	dynamicClient, err := m.getDynamicClient()
 	if err != nil {
-		return []string{}, nil // Return empty list if config fails
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
-	client := action.NewList(actionConfig)
-	releases, err := client.Run()
+	// Define the AutoscalingRunnerSet GVR
+	gvr := schema.GroupVersionResource{
+		Group:    "actions.github.com",
+		Version:  "v1alpha1",
+		Resource: "autoscalingrunnersets",
+	}
+
+	// List AutoscalingRunnerSet resources in the arc-systems namespace
+	list, err := dynamicClient.Resource(gvr).Namespace(defaultNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		// If namespace doesn't exist or no releases, return empty list
+		// If there's an error accessing the resources, return empty list with a note
+		// This handles cases where the CRD isn't installed yet or permissions are missing
 		return []string{}, nil
 	}
 
-	names := []string{}
-	for _, release := range releases {
-		// Exclude the ARC controller from the list
-		if release.Name != arcControllerRelease {
-			names = append(names, release.Name)
+	var runnerNames []string
+	for _, item := range list.Items {
+		name := item.GetName()
+		// Filter out any potential non-runner resources
+		if name != "" && name != arcControllerAppName {
+			runnerNames = append(runnerNames, name)
 		}
 	}
 
-	return names, nil
+	return runnerNames, nil
 }
 
 // Status returns the status of a runner installation
 func (m *Manager) Status(ctx context.Context, name string) (string, error) {
-	// Get Helm release status using SDK
-	actionConfig, err := m.getHelmConfig(defaultNamespace)
-	if err != nil {
-		return "", fmt.Errorf("failed to create helm config: %w", err)
+	kappClient := m.getKappClient()
+
+	// First try single instance (name as-is)
+	inspectOutput, err := kappClient.Inspect(name)
+	if err == nil {
+		// Single instance found
+		statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
+
+		arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, name)
+		if err != nil {
+			return statusStr + inspectOutput, nil
+		}
+
+		return fmt.Sprintf("%s\nKubernetes Resources:\n%s\n\nkapp Details:\n%s", statusStr, arsStatus, inspectOutput), nil
 	}
 
-	client := action.NewStatus(actionConfig)
-	release, err := client.Run(name)
-	if err != nil {
+	// Check if the error indicates the app doesn't exist
+	if !strings.Contains(err.Error(), "does not exist") {
+		// Some other error occurred
 		return "", fmt.Errorf("failed to get status: %w", err)
 	}
 
-	statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nSTATUS: %s\nREVISION: %d\n",
-		release.Name, release.Namespace, release.Info.Status, release.Version)
-
-	// Also get the AutoscalingRunnerSet status
-	arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, name)
+	// Single instance not found, try to find multiple instances directly via ConfigMaps
+	// Kapp stores app state in ConfigMaps with the app name
+	clientset, err := m.getKubernetesClient()
 	if err != nil {
-		// Just show Helm status if getting ARS status fails
-		return statusStr, nil
+		return "", fmt.Errorf("failed to get kubernetes client: %w", err)
 	}
 
-	return fmt.Sprintf("%s\nKubernetes Resources:\n%s", statusStr, arsStatus), nil
+	configMaps, err := clientset.CoreV1().ConfigMaps(defaultNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list ConfigMaps: %w", err)
+	}
+
+	// Look for instances with pattern name-1, name-2, etc.
+	var instanceNames []string
+	for _, configMap := range configMaps.Items {
+		cmName := configMap.Name
+		// Skip change tracking ConfigMaps
+		if strings.Contains(cmName, "-change-") {
+			continue
+		}
+		// Check if it matches our pattern
+		if strings.HasPrefix(cmName, name+"-") {
+			// Check if suffix is a number
+			suffix := strings.TrimPrefix(cmName, name+"-")
+			if _, err := strconv.Atoi(suffix); err == nil {
+				instanceNames = append(instanceNames, cmName)
+			}
+		}
+	}
+
+	if len(instanceNames) == 0 {
+		return "", fmt.Errorf("failed to get status: kapp inspect failed: App '%s' (namespace: %s) does not exist", name, defaultNamespace)
+	}
+
+	// Sort instance names for consistent output
+	sort.Strings(instanceNames)
+
+	// Show status for all instances
+	var results []string
+	statusHeader := fmt.Sprintf("NAME: %s (Multi-instance)\nNAMESPACE: %s\nMANAGED BY: kapp\nINSTANCES: %d\n",
+		name, defaultNamespace, len(instanceNames))
+
+	for _, instanceName := range instanceNames {
+		results = append(results, fmt.Sprintf("=== Instance: %s ===", instanceName))
+
+		inspectOutput, err := kappClient.Inspect(instanceName)
+		if err != nil {
+			results = append(results, fmt.Sprintf("Error inspecting %s: %v", instanceName, err))
+			continue
+		}
+
+		arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, instanceName)
+		if err != nil {
+			results = append(results, fmt.Sprintf("Kubernetes Resources: Error getting status: %v", err))
+		} else {
+			results = append(results, fmt.Sprintf("Kubernetes Resources:\n%s", arsStatus))
+		}
+
+		results = append(results, fmt.Sprintf("kapp Details:\n%s", inspectOutput))
+		results = append(results, "") // Empty line between instances
+	}
+
+	return statusHeader + "\n" + strings.Join(results, "\n"), nil
 }
 
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
@@ -592,8 +601,8 @@ func containsMiddle(s, substr string) bool {
 	return false
 }
 
-// generateHelmValues generates Helm values for the runner scale set
-func (m *Manager) generateHelmValues(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) (string, error) {
+// generateYTTDataValues generates ytt data values for the runner scale set
+func (m *Manager) generateYTTDataValues(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) (string, error) {
 	// Build the values map
 	values := map[string]interface{}{
 		"githubConfigUrl":    installation.Repository,
@@ -655,36 +664,14 @@ func (m *Manager) generateHelmValues(installation *deskruntypes.RunnerInstallati
 				},
 			},
 		}
-	case deskruntypes.ContainerModePrivileged:
-		// For privileged mode, we need to parse the generated YAML string into a map
-		containerModeYAML := m.generatePrivilegedContainerMode(installation, instanceName, instanceNum)
-		// The function returns the full "containerMode: ..." structure, so parse it into a temp object
-		tempConfig := make(map[string]interface{})
-		if err := yaml.Unmarshal([]byte(containerModeYAML), &tempConfig); err != nil {
-			return "", fmt.Errorf("failed to parse privileged container mode YAML: %w", err)
-		}
-		// Extract the containerMode value from the parsed YAML
-		if cm, ok := tempConfig["containerMode"]; ok {
-			if cmMap, ok := cm.(map[string]interface{}); ok {
-				containerModeConfig = cmMap
-			} else {
-				return "", fmt.Errorf("containerMode is not a map: %T", cm)
-			}
-		} else {
-			return "", fmt.Errorf("containerMode not found in generated YAML")
-		}
-		// Also add template and other top-level fields from the privileged config
-		if template, ok := tempConfig["template"]; ok {
-			// For privileged mode, we need to merge both containerMode and template at the top level
-			// Reconstruct containerModeConfig to include the template
-			if tempCM, ok := tempConfig["containerMode"].(map[string]interface{}); ok {
-				containerModeConfig = tempCM
-			}
-			values["template"] = template
-		}
 	case deskruntypes.ContainerModeDinD:
 		containerModeConfig = map[string]interface{}{
 			"type": "dind",
+		}
+	case deskruntypes.ContainerModePrivileged:
+		// cached-privileged-kubernetes mode using kubernetes-novolume
+		containerModeConfig = map[string]interface{}{
+			"type": "kubernetes-novolume",
 		}
 	default:
 		return "", fmt.Errorf("unsupported container mode: %s", installation.ContainerMode)
@@ -698,55 +685,6 @@ func (m *Manager) generateHelmValues(installation *deskruntypes.RunnerInstallati
 	}
 
 	return string(yamlData), nil
-}
-
-// generatePrivilegedContainerMode generates the containerMode configuration for privileged kubernetes mode
-// using ARC's hook extension pattern to inject privileged context into job containers only.
-// Uses kubernetes-novolume mode to avoid PVC complications - ephemeral storage is handled by the hook extension.
-func (m *Manager) generatePrivilegedContainerMode(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) string {
-	config := `containerMode:
-  type: "kubernetes-novolume"
-template:
-  spec:
-    securityContext:
-      runAsUser: 1001
-      runAsGroup: 1001
-      fsGroup: 1001
-    containers:
-    - name: runner
-      image: "ghcr.io/actions/actions-runner:latest"
-      command: ["/home/runner/run.sh"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: false
-        runAsNonRoot: true
-        runAsUser: 1001
-        runAsGroup: 1001
-      env:
-      - name: ACTIONS_RUNNER_CONTAINER_HOOKS
-        value: "/home/runner/k8s-novolume/index.js"
-      - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
-        value: "/etc/hooks/content"
-      - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
-        value: "false"`
-
-	// Add volume mounts for hook extension only
-	// Cache volumes are only needed for job containers and are defined in the hook extension
-	config += "\n      volumeMounts:"
-	config += "\n      - name: hook-extension"
-	config += "\n        mountPath: /etc/hooks"
-	config += "\n        readOnly: true"
-
-	// Define only the hook-extension volume
-	// Cache volumes are only needed for job containers and are defined in the hook extension
-	configMapName := fmt.Sprintf("privileged-hook-extension-%s", instanceName)
-	config += "\n    volumes:"
-	config += "\n    - name: hook-extension"
-	config += "\n      configMap:"
-	config += fmt.Sprintf("\n        name: %s", configMapName)
-	config += "\n        defaultMode: 0755"
-
-	return config
 }
 
 // generateHookExtensionConfigMap generates the hook extension ConfigMap YAML for privileged container mode
@@ -875,6 +813,7 @@ func sanitizeVolumeName(path string) string {
 	name = strings.ReplaceAll(name, ".", "-")
 	return name
 }
+
 func (m *Manager) ensureARCController(ctx context.Context) error {
 	// Check if CRDs are already installed
 	exists, err := m.crdExists(ctx, "autoscalingrunnersets.actions.github.com")
@@ -889,36 +828,42 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	// CRDs don't exist, install the controller
 	fmt.Println("Installing GitHub Actions Runner Controller...")
 
-	// Install controller using Helm SDK
-	actionConfig, err := m.getHelmConfig(arcControllerNamespace)
+	// Create temporary directory for controller templates
+	tmpDir, err := os.MkdirTemp("/tmp", "deskrun-controller-*")
 	if err != nil {
-		return fmt.Errorf("failed to create helm config: %w", err)
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Get controller template using the unified template package
+	// ProcessTemplate applies the overlay which adds required RBAC permissions
+	processor := templates.NewProcessor()
+	config := templates.Config{
+		Installation: &deskruntypes.RunnerInstallation{
+			Name:          "arc-controller",
+			Repository:    "https://github.com/placeholder",
+			ContainerMode: deskruntypes.ContainerModeKubernetes,
+		},
+		InstanceName: "arc-controller",
+		InstanceNum:  1,
+	}
+	controllerYAML, err := processor.ProcessTemplate(templates.TemplateTypeController, config)
+	if err != nil {
+		return fmt.Errorf("failed to get controller chart: %w", err)
 	}
 
-	client := action.NewInstall(actionConfig)
-	client.ReleaseName = arcControllerRelease
-	client.Namespace = arcControllerNamespace
-	client.CreateNamespace = true
-	client.Wait = true
-	client.Timeout = 5 * time.Minute
-
-	// Locate and load the chart from OCI registry
-	chartPath := fmt.Sprintf("%s/%s", arcControllerChartRepo, arcControllerChartName)
-	chartRef, err := client.ChartPathOptions.LocateChart(chartPath, cli.New())
-	if err != nil {
-		return fmt.Errorf("failed to locate chart: %w", err)
+	// Write to temp file for kapp
+	controllerPath := filepath.Join(tmpDir, "controller.yaml")
+	if err := os.WriteFile(controllerPath, controllerYAML, 0644); err != nil {
+		return fmt.Errorf("failed to write controller template: %w", err)
 	}
 
-	chart, err := loader.Load(chartRef)
-	if err != nil {
-		return fmt.Errorf("failed to load chart: %w", err)
-	}
-
-	// Install with empty values
-	_, err = client.Run(chart, nil)
-	if err != nil {
+	// Deploy controller using kapp (no ytt processing needed for controller - it's pre-rendered)
+	appName := arcControllerAppName
+	kappClient := m.getKappClient()
+	if err := kappClient.Deploy(appName, controllerPath); err != nil {
 		// Check if already installed
-		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "cannot re-use") {
+		if strings.Contains(err.Error(), "already exists") {
 			fmt.Println("Controller already installed")
 			return nil
 		}

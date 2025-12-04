@@ -1,0 +1,15 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - helmChart:
+      appVersion: 0.13.0
+      version: 0.13.0
+    path: .
+  path: upstream/gha-runner-scale-set-controller
+- contents:
+  - helmChart:
+      appVersion: 0.13.0
+      version: 0.13.0
+    path: .
+  path: upstream/gha-runner-scale-set
+kind: LockConfig

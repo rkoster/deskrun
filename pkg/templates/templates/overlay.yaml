@@ -1,0 +1,281 @@
+#@ load("@ytt:data", "data")
+#@ load("@ytt:overlay", "overlay")
+#@ load("@ytt:base64", "base64")
+
+#! Deskrun-specific overlay for customizing the base templates
+#! This overlay applies customizations for:
+#! - Instance naming (names, labels)
+#! - GitHub repository and auth configuration
+#! - Privileged mode specific: cache volumes and hook extensions
+
+#! Apply name transformations to Secret
+#@overlay/match by=overlay.subset({"kind":"Secret"}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-github-secret"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+data:
+  #@overlay/match missing_ok=True
+  github_token: #@ base64.encode(data.values.installation.authValue)
+
+#! Apply name transformations to no-permission ServiceAccount (dind mode)
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount","metadata":{"name":"arc-runner-gha-rs-no-permission"}}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-no-permission"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#! Apply name transformations to kube-mode ServiceAccount (kubernetes/privileged mode)
+#@overlay/match by=overlay.subset({"kind":"ServiceAccount","metadata":{"name":"arc-runner-gha-rs-kube-mode"}}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#! Apply name transformations to manager Role
+#@overlay/match by=overlay.subset({"kind":"Role","metadata":{"labels":{"app.kubernetes.io/component":"manager-role"}}}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#! Apply name transformations to kube-mode Role (kubernetes/privileged mode)
+#@overlay/match by=overlay.subset({"kind":"Role","metadata":{"name":"arc-runner-gha-rs-kube-mode"}}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+
+#! Apply name transformations to manager RoleBinding
+#@overlay/match by=overlay.subset({"kind":"RoleBinding","metadata":{"labels":{"app.kubernetes.io/component":"manager-role-binding"}}}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+roleRef:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-manager"
+
+#! Apply name transformations to kube-mode RoleBinding (kubernetes/privileged mode)
+#@overlay/match by=overlay.subset({"kind":"RoleBinding","metadata":{"name":"arc-runner-gha-rs-kube-mode"}}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+roleRef:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+subjects:
+#@overlay/match by="name"
+#@overlay/replace
+- name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+  kind: ServiceAccount
+  namespace: arc-systems
+
+#! Apply base transformations to AutoscalingRunnerSet - dind mode specific annotations
+#@ if data.values.installation.containerMode == "dind":
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+  annotations:
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-manager-role-binding: #@ data.values.installation.name + "-gha-rs-manager"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-manager-role-name: #@ data.values.installation.name + "-gha-rs-manager"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-no-permission-service-account-name: #@ data.values.installation.name + "-gha-rs-no-permission"
+spec:
+  #@overlay/match missing_ok=True
+  githubConfigUrl: #@ data.values.installation.repository
+  #@overlay/match missing_ok=True
+  githubConfigSecret: #@ data.values.installation.name + "-gha-rs-github-secret"
+  template:
+    spec:
+      #@overlay/match missing_ok=True
+      serviceAccountName: #@ data.values.installation.name + "-gha-rs-no-permission"
+#@ end
+
+#! Apply base transformations to AutoscalingRunnerSet - kubernetes mode specific annotations
+#@ if data.values.installation.containerMode == "kubernetes":
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+  annotations:
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-manager-role-binding: #@ data.values.installation.name + "-gha-rs-manager"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-manager-role-name: #@ data.values.installation.name + "-gha-rs-manager"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-kubernetes-mode-role-binding-name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-kubernetes-mode-role-name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-kubernetes-mode-service-account-name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+spec:
+  #@overlay/match missing_ok=True
+  githubConfigUrl: #@ data.values.installation.repository
+  #@overlay/match missing_ok=True
+  githubConfigSecret: #@ data.values.installation.name + "-gha-rs-github-secret"
+  template:
+    spec:
+      #@overlay/match missing_ok=True
+      serviceAccountName: #@ data.values.installation.name + "-gha-rs-kube-mode"
+#@ end
+
+#! Apply base transformations to AutoscalingRunnerSet - privileged mode specific
+#@ if data.values.installation.containerMode == "cached-privileged-kubernetes":
+#@overlay/match by=overlay.subset({"kind":"AutoscalingRunnerSet"}),expects="0+"
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ data.values.installation.name
+  labels:
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/name: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    app.kubernetes.io/instance: #@ data.values.installation.name
+    #@overlay/match missing_ok=True
+    actions.github.com/scale-set-name: #@ data.values.installation.name
+  annotations:
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-manager-role-binding: #@ data.values.installation.name + "-gha-rs-manager"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-manager-role-name: #@ data.values.installation.name + "-gha-rs-manager"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-kubernetes-mode-role-binding-name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-kubernetes-mode-role-name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+    #@overlay/match missing_ok=True
+    actions.github.com/cleanup-kubernetes-mode-service-account-name: #@ data.values.installation.name + "-gha-rs-kube-mode"
+spec:
+  #@overlay/match missing_ok=True
+  githubConfigUrl: #@ data.values.installation.repository
+  #@overlay/match missing_ok=True
+  githubConfigSecret: #@ data.values.installation.name + "-gha-rs-github-secret"
+  template:
+    spec:
+      #@overlay/match missing_ok=True
+      serviceAccountName: #@ data.values.installation.name + "-gha-rs-kube-mode"
+      #@overlay/match missing_ok=True
+      securityContext:
+        fsGroup: 123
+      containers:
+      #@overlay/match by="name"
+      - name: runner
+        #@overlay/match missing_ok=True
+        securityContext:
+          privileged: true
+          allowPrivilegeEscalation: true
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false
+        env:
+        #@overlay/match by="name"
+        - name: ACTIONS_RUNNER_CONTAINER_HOOKS
+          #@overlay/match missing_ok=True
+          value: /home/runner/k8s-novolume/index.js
+        #@overlay/append
+        - name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE
+          value: /etc/hooks/content
+        #@overlay/match by="name"
+        - name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER
+          #@overlay/match missing_ok=True
+          value: "false"
+        #@overlay/replace
+        volumeMounts:
+        - name: hook-extension
+          mountPath: /etc/hooks
+          readOnly: true
+        #@ for i, cachePath in enumerate(data.values.installation.cachePaths):
+        - name: #@ "cache-" + str(i)
+          mountPath: #@ cachePath.target
+        #@ end
+      #@overlay/replace
+      volumes:
+      - name: hook-extension
+        configMap:
+          name: #@ "privileged-hook-extension-" + data.values.installation.name
+          defaultMode: 0755
+      #@ for i, cachePath in enumerate(data.values.installation.cachePaths):
+      - name: #@ "cache-" + str(i)
+        #@ if cachePath.source == "":
+        emptyDir: {}
+        #@ else:
+        hostPath:
+          path: #@ cachePath.source
+          type: DirectoryOrCreate
+        #@ end
+      #@ end
+#@ end

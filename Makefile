@@ -1,4 +1,4 @@
-.PHONY: build test clean install lint fmt help runner-update
+.PHONY: build test clean install lint fmt help runner-update vendor-charts
 
 # Binary name
 BINARY_NAME=deskrun
@@ -22,6 +22,7 @@ help:
 	@echo "  check           - Run linter and tests"
 	@echo "  dev             - Build and run the binary"
 	@echo "  runner-update   - Update test runner with Nix and Docker caching (requires gh CLI)"
+	@echo "  vendor-charts   - Render and vendor ARC Helm charts to YAML"
 	@echo "  help            - Show this help message"
 
 # Build the binary
@@ -34,9 +35,9 @@ build-all:
 	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 ./cmd/deskrun
 	GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-darwin-arm64 ./cmd/deskrun
 
-# Run tests
+# Run tests (excludes upstream/ which contains vendored helm chart tests with external dependencies)
 test:
-	go test -v ./...
+	go test -v ./cmd/... ./internal/... ./pkg/...
 
 # Clean build artifacts
 clean:
@@ -93,3 +94,31 @@ runner-update:
 	go run ./cmd/deskrun up && \
 	echo "" && \
 	echo "Runner updated successfully!"
+
+# Vendor ARC charts using vendir and render them with Helm
+vendor-charts:
+	@echo "Syncing upstream helm charts using vendir..."
+	vendir sync
+	@echo ""
+	@echo "Rendering ARC controller chart..."
+	@mkdir -p pkg/templates/templates/controller
+	@helm template arc-controller ./upstream/gha-runner-scale-set-controller \
+		--namespace arc-systems \
+		> pkg/templates/templates/controller/rendered.yaml
+	@echo "ARC controller chart rendered to pkg/templates/templates/controller/rendered.yaml"
+	@echo ""
+	@echo "Adding CRDs to controller chart..."
+	@echo "---" >> pkg/templates/templates/controller/rendered.yaml
+	@cat ./upstream/gha-runner-scale-set-controller/crds/*.yaml >> pkg/templates/templates/controller/rendered.yaml
+	@echo "CRDs added to pkg/templates/templates/controller/rendered.yaml"
+	@echo ""
+	@echo "Generating base templates for scale-set..."
+	@./scripts/generate-base-templates.sh
+	@echo ""
+	@echo "Updating test expected files..."
+	@ACCEPT_DIFF=true go test ./internal/runner/template_spec/... ./pkg/templates/...
+	@echo ""
+	@echo "Charts synced and base templates generated successfully!"
+	@echo "  - Raw helm charts: upstream/"
+	@echo "  - Controller template: pkg/templates/templates/controller/rendered.yaml"
+	@echo "  - Scale-set base templates: pkg/templates/templates/scale-set/bases/"

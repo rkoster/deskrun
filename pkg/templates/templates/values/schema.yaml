@@ -1,0 +1,37 @@
+#@data/values-schema
+---
+#@schema/desc "Installation configuration"
+installation:
+  #@schema/desc "Installation name"
+  name: ""
+  
+  #@schema/desc "GitHub repository URL"
+  repository: ""
+  
+  #@schema/desc "Authentication value (PAT or GitHub App private key)"
+  authValue: ""
+  
+  #@schema/desc "Container mode - must be one of: kubernetes, dind, cached-privileged-kubernetes"
+  #@schema/validation one_of=["kubernetes", "dind", "cached-privileged-kubernetes"]
+  containerMode: "kubernetes"
+  
+  #@schema/desc "Minimum number of runners"
+  #@schema/validation min=0
+  minRunners: 1
+  
+  #@schema/desc "Maximum number of runners"
+  #@schema/validation min=1
+  maxRunners: 3
+  
+  #@schema/desc "Cache path configurations for privileged mode"
+  #@schema/nullable
+  cachePaths:
+  - #@schema/desc "Cache path mapping"
+    #@schema/desc "Source path on host"
+    source: ""
+    #@schema/desc "Target path in container"  
+    target: ""
+  
+  #@schema/desc "Instance number for multi-instance deployments"
+  #@schema/validation min=0
+  instanceNum: 0
