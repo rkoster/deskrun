@@ -116,11 +116,11 @@ func (c *Client) Delete(appName string) error {
 
 	// Set the command args
 	kappCommand.SetArgs([]string{
-		"inspect",
+		"delete",
 		"-a", appName,
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
-		"--tree",
+		"-y", // auto-confirm
 		"--color=false",
 		"--tty=false",
 	})
@@ -187,8 +187,8 @@ func (c *Client) List() ([]string, error) {
 	return names, nil
 }
 
-// Inspect inspects a kapp app
-func (c *Client) Inspect(appName string) (string, error) {
+// inspectWithFlags is a helper method that executes kapp inspect with custom flags
+func (c *Client) inspectWithFlags(appName string, flags []string) (string, error) {
 	// Create a buffer to capture output
 	var outBuf, errBuf bytes.Buffer
 	confUI := ui.NewConfUI(ui.NewNoopLogger())
@@ -197,16 +197,18 @@ func (c *Client) Inspect(appName string) (string, error) {
 	// Create the kapp command
 	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
 
-	// Set the command args
-	kappCommand.SetArgs([]string{
+	// Build base args
+	baseArgs := []string{
 		"inspect",
 		"-a", appName,
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
-		"--json",
 		"--color=false",
 		"--tty=false",
-	})
+	}
+
+	// Append custom flags
+	kappCommand.SetArgs(append(baseArgs, flags...))
 
 	// Capture output
 	kappCommand.SetOut(&outBuf)
@@ -218,110 +220,43 @@ func (c *Client) Inspect(appName string) (string, error) {
 	}
 
 	return outBuf.String(), nil
+}
+
+// Inspect inspects a kapp app
+func (c *Client) Inspect(appName string) (string, error) {
+	return c.inspectWithFlags(appName, []string{"--json"})
 }
 
 // InspectWithTree inspects a kapp app with tree output showing resource hierarchy
 func (c *Client) InspectWithTree(appName string) (string, error) {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
-	// Set the command args
-	kappCommand.SetArgs([]string{
-		"inspect",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--tree",
-		"--color=false",
-		"--tty=false",
-	})
-
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
-	}
-
-	return outBuf.String(), nil
+	return c.inspectWithFlags(appName, []string{"--tree"})
 }
 
 // InspectJSON gets the JSON output from kapp inspect
 func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
-	// Set the command args
-	kappCommand.SetArgs([]string{
-		"inspect",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--json",
-		"--color=false",
-		"--tty=false",
-	})
-
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		return nil, fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
+	output, err := c.inspectWithFlags(appName, []string{"--json"})
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse JSON output
-	var output KappInspectOutput
-	if err := json.Unmarshal(outBuf.Bytes(), &output); err != nil {
+	var kappOutput KappInspectOutput
+	if err := json.Unmarshal([]byte(output), &kappOutput); err != nil {
 		return nil, fmt.Errorf("failed to parse kapp JSON output: %w", err)
 	}
 
-	return &output, nil
+	return &kappOutput, nil
 }
 
 // InspectTreeRaw gets the raw tree output from kapp inspect (just the clean resource lines)
 func (c *Client) InspectTreeRaw(appName string) ([]string, error) {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
-	// Set the command args
-	kappCommand.SetArgs([]string{
-		"inspect",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--tree",
-	})
-
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		return nil, fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
+	output, err := c.inspectWithFlags(appName, []string{"--tree"})
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse just the resource lines (skip headers/footers)
-	lines := strings.Split(outBuf.String(), "\n")
+	lines := strings.Split(output, "\n")
 	var resourceLines []string
 
 	for _, line := range lines {

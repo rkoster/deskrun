@@ -13,14 +13,15 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
+	Use:   "status [name]",
 	Short: "Show status of runner installations",
-	Long: `Show the status of all runner installations in the kind cluster.
+	Long: `Show the status of runner installations in the kind cluster.
 
 Examples:
   deskrun status           # Show all runners
+  deskrun status my-runner # Show status for specific runner
 `,
-	Args: cobra.NoArgs,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runStatus,
 }
 
@@ -58,6 +59,29 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Cluster '%s' is running\n\n", clusterConfig.Name)
 
 	runnerMgr := runner.NewManager(clusterMgr)
+
+	// Check if specific runner name was provided
+	if len(args) > 0 {
+		// Show status for specific runner
+		name := args[0]
+		
+		// Add runner header
+		fmt.Printf("Runner: %s\n", name)
+
+		// Get kapp client to directly call InspectTreeRaw
+		kappClient := runnerMgr.GetKappClient()
+		treeLines, err := kappClient.InspectTreeRaw(name)
+		if err != nil {
+			return fmt.Errorf("failed to get status for %s: %w", name, err)
+		}
+
+		// Print the clean tree lines
+		for _, line := range treeLines {
+			fmt.Println(line)
+		}
+
+		return nil
+	}
 
 	// Show all runners with tree output
 	names, err := runnerMgr.List(ctx)
