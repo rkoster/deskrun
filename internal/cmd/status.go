@@ -13,18 +13,14 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status [name]",
+	Use:   "status",
 	Short: "Show status of runner installations",
-	Long: `Show the status of runner installations in the kind cluster.
-
-If a name is provided, shows detailed status for that specific runner.
-Otherwise, shows status for all runners.
+	Long: `Show the status of all runner installations in the kind cluster.
 
 Examples:
   deskrun status           # Show all runners
-  deskrun status my-runner # Show specific runner
 `,
-	Args: cobra.MaximumNArgs(1),
+	Args: cobra.NoArgs,
 	RunE: runStatus,
 }
 
@@ -63,29 +59,37 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	runnerMgr := runner.NewManager(clusterMgr)
 
-	if len(args) == 1 {
-		// Show specific runner status
-		name := args[0]
-		status, err := runnerMgr.Status(ctx, name)
-		if err != nil {
-			return fmt.Errorf("failed to get status: %w", err)
-		}
-		fmt.Println(status)
-	} else {
-		// Show all runners
-		names, err := runnerMgr.List(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to list runners: %w", err)
+	// Show all runners with tree output
+	names, err := runnerMgr.List(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list runners: %w", err)
+	}
+
+	if len(names) == 0 {
+		fmt.Println("No runners found in cluster")
+		return nil
+	}
+
+	fmt.Println("Runners in cluster:")
+	for i, name := range names {
+		if i > 0 {
+			fmt.Println() // Add blank line between runners
 		}
 
-		if len(names) == 0 {
-			fmt.Println("No runners found in cluster")
-			return nil
+		// Add runner header
+		fmt.Printf("Runner: %s\n", name)
+
+		// Get kapp client to directly call InspectTreeRaw
+		kappClient := runnerMgr.GetKappClient()
+		treeLines, err := kappClient.InspectTreeRaw(name)
+		if err != nil {
+			fmt.Printf("Error getting status for %s: %v\n", name, err)
+			continue
 		}
 
-		fmt.Println("Runners in cluster:")
-		for _, name := range names {
-			fmt.Printf("  - %s\n", name)
+		// Print the clean tree lines
+		for _, line := range treeLines {
+			fmt.Println(line)
 		}
 	}
 

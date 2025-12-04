@@ -2,6 +2,7 @@ package kapp
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -14,6 +15,29 @@ import (
 type Client struct {
 	kubeconfig string
 	namespace  string
+}
+
+// KappResource represents a single resource from kapp JSON output
+type KappResource struct {
+	Age            string `json:"age"`
+	Kind           string `json:"kind"`
+	Name           string `json:"name"`
+	Namespace      string `json:"namespace"`
+	Owner          string `json:"owner"`
+	ReconcileInfo  string `json:"reconcile_info"`
+	ReconcileState string `json:"reconcile_state"`
+}
+
+// KappTable represents the table structure in kapp JSON output
+type KappTable struct {
+	Content string            `json:"Content"`
+	Header  map[string]string `json:"Header"`
+	Rows    []KappResource    `json:"Rows"`
+}
+
+// KappInspectOutput represents the full kapp JSON output
+type KappInspectOutput struct {
+	Tables []KappTable `json:"Tables"`
 }
 
 // NewClient creates a new kapp client
@@ -64,6 +88,8 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
 		"-y", // auto-confirm
+		"--color=false",
+		"--tty=false",
 	})
 
 	// Capture output
@@ -90,11 +116,13 @@ func (c *Client) Delete(appName string) error {
 
 	// Set the command args
 	kappCommand.SetArgs([]string{
-		"delete",
+		"inspect",
 		"-a", appName,
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
-		"-y", // auto-confirm
+		"--tree",
+		"--color=false",
+		"--tty=false",
 	})
 
 	// Capture output
@@ -124,6 +152,8 @@ func (c *Client) List() ([]string, error) {
 		"list",
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
+		"--color=false",
+		"--tty=false",
 	})
 
 	// Capture output
@@ -174,6 +204,8 @@ func (c *Client) Inspect(appName string) (string, error) {
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
 		"--json",
+		"--color=false",
+		"--tty=false",
 	})
 
 	// Capture output
@@ -205,6 +237,8 @@ func (c *Client) InspectWithTree(appName string) (string, error) {
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
 		"--tree",
+		"--color=false",
+		"--tty=false",
 	})
 
 	// Capture output
@@ -217,4 +251,88 @@ func (c *Client) InspectWithTree(appName string) (string, error) {
 	}
 
 	return outBuf.String(), nil
+}
+
+// InspectJSON gets the JSON output from kapp inspect
+func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+
+	// Create the kapp command
+	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
+
+	// Set the command args
+	kappCommand.SetArgs([]string{
+		"inspect",
+		"-a", appName,
+		"--kubeconfig-context", c.kubeconfig,
+		"-n", c.namespace,
+		"--json",
+		"--color=false",
+		"--tty=false",
+	})
+
+	// Capture output
+	kappCommand.SetOut(&outBuf)
+	kappCommand.SetErr(&errBuf)
+
+	// Execute the command
+	if err := kappCommand.Execute(); err != nil {
+		return nil, fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
+	}
+
+	// Parse JSON output
+	var output KappInspectOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &output); err != nil {
+		return nil, fmt.Errorf("failed to parse kapp JSON output: %w", err)
+	}
+
+	return &output, nil
+}
+
+// InspectTreeRaw gets the raw tree output from kapp inspect (just the clean resource lines)
+func (c *Client) InspectTreeRaw(appName string) ([]string, error) {
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+
+	// Create the kapp command
+	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
+
+	// Set the command args
+	kappCommand.SetArgs([]string{
+		"inspect",
+		"-a", appName,
+		"--kubeconfig-context", c.kubeconfig,
+		"-n", c.namespace,
+		"--tree",
+	})
+
+	// Capture output
+	kappCommand.SetOut(&outBuf)
+	kappCommand.SetErr(&errBuf)
+
+	// Execute the command
+	if err := kappCommand.Execute(); err != nil {
+		return nil, fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, errBuf.String())
+	}
+
+	// Parse just the resource lines (skip headers/footers)
+	lines := strings.Split(outBuf.String(), "\n")
+	var resourceLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Keep lines that look like resources (start with namespace or have tree indicators)
+		if trimmed != "" && (strings.HasPrefix(line, c.namespace) ||
+			strings.Contains(line, " L ") || strings.Contains(line, " L..") ||
+			strings.Contains(line, "\tL ") || strings.Contains(line, "\tL..")) {
+			resourceLines = append(resourceLines, line)
+		}
+	}
+
+	return resourceLines, nil
 }

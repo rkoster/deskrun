@@ -55,6 +55,11 @@ func (m *Manager) getKappClient() *kapp.Client {
 	return kapp.NewClient(m.clusterManager.GetKubeconfig(), defaultNamespace)
 }
 
+// GetKappClient returns a kapp client configured for the current cluster (public version)
+func (m *Manager) GetKappClient() *kapp.Client {
+	return kapp.NewClient(m.clusterManager.GetKubeconfig(), defaultNamespace)
+}
+
 // customWarningHandler is a warning handler that filters out unrecognized format warnings
 // It implements the rest.WarningHandler interface
 type customWarningHandler struct{}
