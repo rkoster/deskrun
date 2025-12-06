@@ -137,7 +137,22 @@ func (c *Client) Delete(appName string) error {
 	return nil
 }
 
-// List lists all kapp apps
+// KappListApp represents a single app from kapp list JSON output
+type KappListApp struct {
+	Name string `json:"name"`
+}
+
+// KappListTable represents the table structure in kapp list JSON output
+type KappListTable struct {
+	Rows []KappListApp `json:"Rows"`
+}
+
+// KappListOutput represents the full kapp list JSON output
+type KappListOutput struct {
+	Tables []KappListTable `json:"Tables"`
+}
+
+// List lists all kapp apps using JSON output for reliable parsing
 func (c *Client) List() ([]string, error) {
 	// Create a buffer to capture output
 	var outBuf, errBuf bytes.Buffer
@@ -147,11 +162,12 @@ func (c *Client) List() ([]string, error) {
 	// Create the kapp command
 	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
 
-	// Set the command args
+	// Set the command args with --json flag for structured output
 	kappCommand.SetArgs([]string{
 		"list",
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
+		"--json",
 		"--color=false",
 		"--tty=false",
 	})
@@ -169,18 +185,19 @@ func (c *Client) List() ([]string, error) {
 		return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, errBuf.String())
 	}
 
-	// Parse the plain text output manually
-	lines := strings.Split(strings.TrimSpace(outBuf.String()), "\n")
-	var names []string
+	// Parse JSON output
+	var listOutput KappListOutput
+	if err := json.Unmarshal([]byte(outBuf.String()), &listOutput); err != nil {
+		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w", err)
+	}
 
-	// Skip header line and parse app names
-	for i, line := range lines {
-		if i == 0 && strings.Contains(line, "Name") {
-			continue // Skip header
-		}
-		fields := strings.Fields(line)
-		if len(fields) > 0 && fields[0] != "" {
-			names = append(names, fields[0])
+	// Extract app names from JSON
+	var names []string
+	if len(listOutput.Tables) > 0 {
+		for _, app := range listOutput.Tables[0].Rows {
+			if app.Name != "" {
+				names = append(names, app.Name)
+			}
 		}
 	}
 
