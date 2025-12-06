@@ -408,6 +408,94 @@ func TestControllerOverlayAddsRBACPermissions(t *testing.T) {
 	assert.Contains(t, rolebindingsRule.Verbs, "get", "rolebindings rule should have 'get' verb")
 }
 
+func TestControllerOverlayAddsListPermissionToSecrets(t *testing.T) {
+	processor := NewProcessor()
+
+	// Process controller template (which applies the overlay)
+	config := Config{
+		Installation: &types.RunnerInstallation{
+			Name:          "test-runner",
+			Repository:    "https://github.com/test/repo",
+			AuthValue:     "test-token",
+			ContainerMode: types.ContainerModeKubernetes,
+		},
+		InstanceName: "test-runner",
+		InstanceNum:  1,
+	}
+
+	processedYAML, err := processor.ProcessTemplate(TemplateTypeController, config)
+	require.NoError(t, err, "ProcessTemplate should not return an error")
+	require.NotEmpty(t, processedYAML, "Output should not be empty")
+
+	yamlStr := string(processedYAML)
+
+	// Verify the manager_listener_role Role has 'list' permission on secrets
+	// This is required for the controller to list runner-linked secrets during EphemeralRunner finalization
+	assert.Contains(t, yamlStr, "kind: Role", "Should contain Role")
+
+	// Parse YAML to verify specific permissions on secrets resource in the Role
+	type Rule struct {
+		APIGroups []string `yaml:"apiGroups"`
+		Resources []string `yaml:"resources"`
+		Verbs     []string `yaml:"verbs"`
+	}
+	type Role struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+		Rules []Rule `yaml:"rules"`
+	}
+
+	// Split into documents and find the listener Role
+	docs := strings.Split(yamlStr, "---")
+	var listenerRole *Role
+
+	for _, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+		if strings.Contains(doc, "kind: Role") && strings.Contains(doc, "arc-controller-gha-rs-controller-listener") {
+			var role Role
+			err := yaml.Unmarshal([]byte(doc), &role)
+			require.NoError(t, err, "Failed to parse listener Role")
+			listenerRole = &role
+			break
+		}
+	}
+
+	require.NotNil(t, listenerRole, "Should find arc-controller-gha-rs-controller-listener Role")
+	assert.Equal(t, "arc-controller-gha-rs-controller-listener", listenerRole.Metadata.Name)
+
+	// Find the rule for secrets resource
+	var secretsRule *Rule
+	for i := range listenerRole.Rules {
+		rule := &listenerRole.Rules[i]
+		for _, resource := range rule.Resources {
+			if resource == "secrets" {
+				secretsRule = rule
+				break
+			}
+		}
+		if secretsRule != nil {
+			break
+		}
+	}
+
+	require.NotNil(t, secretsRule, "Should have a rule for 'secrets' resource")
+
+	// Verify secrets rule has 'list' verb (added by overlay)
+	assert.Contains(t, secretsRule.Verbs, "list", "secrets rule should have 'list' verb for EphemeralRunner finalization")
+	
+	// Also verify other expected verbs are present
+	assert.Contains(t, secretsRule.Verbs, "create", "secrets rule should have 'create' verb")
+	assert.Contains(t, secretsRule.Verbs, "delete", "secrets rule should have 'delete' verb")
+	assert.Contains(t, secretsRule.Verbs, "get", "secrets rule should have 'get' verb")
+	assert.Contains(t, secretsRule.Verbs, "patch", "secrets rule should have 'patch' verb")
+	assert.Contains(t, secretsRule.Verbs, "update", "secrets rule should have 'update' verb")
+}
+
 func TestGetRawTemplate(t *testing.T) {
 	processor := NewProcessor()
 
