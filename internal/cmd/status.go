@@ -110,6 +110,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 }
 
 // displayResourceTable creates and displays a custom table from kapp JSON output
+// Output format:
+// 23h [RoleBinding] rubionic-workspace-1-gha-rs-kube-mode
+// 23h [AutoscalingRunnerSet] rubionic-workspace-1
+// 23h  L [AutoscalingListener] rubionic-workspace-1-6cd58d58-listener
+// 22h  L.. [EphemeralRunner] rubionic-workspace-1-2zgjv-runner-6mckt
+//        ⚠ | Waiting on finalizers: ephemeralrunner.actions.github.com/finalizer
 func displayResourceTable(output *kapp.KappInspectOutput) error {
 	if len(output.Tables) == 0 {
 		return fmt.Errorf("no tables in kapp output")
@@ -124,78 +130,44 @@ func displayResourceTable(output *kapp.KappInspectOutput) error {
 		return nil
 	}
 
-	// Calculate column widths
-	maxNamespace := len("Namespace")
-	maxName := len("Name")
-	maxKind := len("Kind")
-	maxOwner := len("Owner")
-	maxRs := len("Rs")
-	maxRi := len("Ri")
-
+	// Print resources in the requested format
 	for _, r := range resources {
-		if len(r.Namespace) > maxNamespace {
-			maxNamespace = len(r.Namespace)
-		}
-		if len(r.Name) > maxName {
-			maxName = len(r.Name)
-		}
-		if len(r.Kind) > maxKind {
-			maxKind = len(r.Kind)
-		}
-		if len(r.Owner) > maxOwner {
-			maxOwner = len(r.Owner)
-		}
-		if len(r.ReconcileState) > maxRs {
-			maxRs = len(r.ReconcileState)
-		}
-		// ReconcileInfo can be multi-line, handle first line for width calculation
-		firstLine := strings.Split(r.ReconcileInfo, "\n")[0]
-		if len(firstLine) > maxRi {
-			maxRi = len(firstLine)
-		}
-	}
-
-	// Print header
-	fmt.Printf("%-*s  %-*s  %-*s  %-*s  %-*s  %s\n",
-		maxNamespace, "Namespace",
-		maxName, "Name",
-		maxKind, "Kind",
-		maxOwner, "Owner",
-		maxRs, "Rs",
-		"Ri")
-
-	// Print resources
-	for _, r := range resources {
-		// Handle multi-line reconcile info
-		riLines := strings.Split(r.ReconcileInfo, "\n")
-		firstRi := "-"
-		if len(riLines) > 0 && riLines[0] != "" {
-			firstRi = riLines[0]
+		// Extract hierarchy prefix from name (L, L.., etc.)
+		name := r.Name
+		hierarchyPrefix := ""
+		
+		// Check if name starts with spaces (indicating hierarchy)
+		if strings.HasPrefix(name, " ") {
+			// Count leading spaces and extract hierarchy markers
+			trimmed := strings.TrimLeft(name, " ")
+			spacesCount := len(name) - len(trimmed)
+			
+			// In tree output, hierarchy is indicated by leading spaces
+			// Typically: 1 space = L, 2 spaces = L.., etc.
+			if spacesCount > 0 {
+				hierarchyPrefix = " L"
+				if spacesCount > 1 {
+					hierarchyPrefix += strings.Repeat(".", spacesCount-1)
+				}
+				hierarchyPrefix += " "
+			}
+			name = trimmed
 		}
 
-		// Print first line with all columns
-		fmt.Printf("%-*s  %-*s  %-*s  %-*s  %-*s  %s\n",
-			maxNamespace, r.Namespace,
-			maxName, r.Name,
-			maxKind, r.Kind,
-			maxOwner, r.Owner,
-			maxRs, r.ReconcileState,
-			firstRi)
+		// Format: age hierarchyPrefix [Kind] name
+		fmt.Printf("%s %s[%s] %s\n", r.Age, hierarchyPrefix, r.Kind, name)
 
-		// Print additional reconcile info lines if present
-		for i := 1; i < len(riLines); i++ {
-			if riLines[i] != "" {
-				// Indent to align with Ri column
-				indent := maxNamespace + maxName + maxKind + maxOwner + maxRs + 10
-				fmt.Printf("%*s%s\n", indent, "", riLines[i])
+		// If there's reconcile info and it's not ok/empty, show it as a warning
+		if r.ReconcileInfo != "" && r.ReconcileInfo != "-" {
+			// Handle multi-line reconcile info
+			riLines := strings.Split(r.ReconcileInfo, "\n")
+			for _, line := range riLines {
+				if line != "" {
+					fmt.Printf("       ⚠ | %s\n", line)
+				}
 			}
 		}
 	}
-
-	// Print footer
-	fmt.Printf("\nRs: Reconcile state\n")
-	fmt.Printf("Ri: Reconcile information\n")
-	fmt.Printf("\n%d resources\n", len(resources))
 
 	return nil
 }

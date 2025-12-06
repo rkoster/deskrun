@@ -188,13 +188,15 @@ func (c *Client) List() ([]string, error) {
 }
 
 // inspectWithFlags is a helper method that executes kapp inspect with custom flags
-//
-// Note: This uses os/exec to run the kapp CLI directly instead of the kapp Go library
-// because the library's inspect command with --json doesn't properly write to the output
-// buffers set via SetOut(). The library appears to write JSON output through a different
-// mechanism that we cannot easily capture. This is similar to how ProcessTemplate() uses
-// os/exec for ytt. Both kapp and ytt are required to be in PATH for deskrun to work.
 func (c *Client) inspectWithFlags(appName string, flags []string) (string, error) {
+	// Create a buffer to capture output
+	var outBuf, errBuf bytes.Buffer
+	confUI := ui.NewConfUI(ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+
+	// Create the kapp command
+	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
+
 	// Build the full command args
 	baseArgs := []string{
 		"inspect",
@@ -204,26 +206,23 @@ func (c *Client) inspectWithFlags(appName string, flags []string) (string, error
 		"--color=false",
 		"--tty=false",
 	}
-	args := append(baseArgs, flags...)
+	kappCommand.SetArgs(append(baseArgs, flags...))
 
-	// Use os/exec to run kapp CLI directly
-	cmd := exec.Command("kapp", args...)
+	// Capture output
+	kappCommand.SetOut(&outBuf)
+	kappCommand.SetErr(&errBuf)
 
-	output, err := cmd.Output()
-	if err != nil {
-		// Get stderr for better error reporting
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, string(exitErr.Stderr))
-		}
-		return "", fmt.Errorf("kapp inspect failed: %w", err)
+	// Execute the command
+	if err := kappCommand.Execute(); err != nil {
+		return "", fmt.Errorf("kapp inspect failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
 	}
 
-	return string(output), nil
+	return outBuf.String(), nil
 }
 
-// InspectJSON gets the JSON output from kapp inspect and parses it
+// InspectJSON gets the JSON output from kapp inspect with tree hierarchy and parses it
 func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
-	output, err := c.inspectWithFlags(appName, []string{"--json"})
+	output, err := c.inspectWithFlags(appName, []string{"--json", "--tree"})
 	if err != nil {
 		return nil, err
 	}
