@@ -449,8 +449,6 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 	return runnerNames, nil
 }
 
-
-
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
 	clientset, err := m.getKubernetesClient()
 	if err != nil {

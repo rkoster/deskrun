@@ -125,14 +125,46 @@ func formatAge(age string) string {
 	return age
 }
 
+// extractHierarchyInfo extracts hierarchy prefix and actual name from a resource name
+// that may contain leading spaces and hierarchy markers (L, L.., etc.)
+func extractHierarchyInfo(name string) (hierarchyPrefix, actualName string) {
+	// No hierarchy if no leading spaces
+	if !strings.HasPrefix(name, " ") {
+		return "", name
+	}
+
+	trimmed := strings.TrimLeft(name, " ")
+	spacesCount := len(name) - len(trimmed)
+
+	// Check for hierarchy markers (L, L.., L..., etc.)
+	if strings.HasPrefix(trimmed, "L") {
+		parts := strings.SplitN(trimmed, " ", 2)
+		if len(parts) == 2 {
+			hierarchyMarker := parts[0]
+			// Replace L.. with "  L " for better visual alignment
+			if hierarchyMarker == "L.." {
+				return "  L ", parts[1]
+			}
+			return hierarchyMarker + " ", parts[1]
+		}
+	}
+
+	// Fallback to space-based hierarchy
+	if spacesCount == 1 {
+		return "L ", trimmed
+	}
+	// For deeper levels, use "  L " pattern
+	return "  L ", trimmed
+}
+
 // displayResourceTable creates and displays a custom table from kapp JSON output
 // Output format:
 // 23h [RoleBinding] rubionic-workspace-1-gha-rs-kube-mode
 // 23h [AutoscalingRunnerSet] rubionic-workspace-1
 // 23h  L [AutoscalingListener] rubionic-workspace-1-6cd58d58-listener
-// 22h  L.. [EphemeralRunner] rubionic-workspace-1-2zgjv-runner-6mckt
+// 22h   L [EphemeralRunner] rubionic-workspace-1-2zgjv-runner-6mckt
 //
-//	⚠ | Waiting on finalizers: ephemeralrunner.actions.github.com/finalizer
+//	⚠ : Waiting on finalizers: ephemeralrunner.actions.github.com/finalizer
 func displayResourceTable(output *kapp.KappInspectOutput) error {
 	if len(output.Tables) == 0 {
 		return fmt.Errorf("no tables in kapp output")
@@ -149,56 +181,8 @@ func displayResourceTable(output *kapp.KappInspectOutput) error {
 
 	// Print resources in the requested format
 	for _, r := range resources {
-		// Extract hierarchy prefix from name (L, L.., etc.)
-		name := r.Name
-		hierarchyPrefix := ""
-
-		// Check if name starts with spaces (indicating hierarchy)
-		if strings.HasPrefix(name, " ") {
-			// Count leading spaces and extract hierarchy markers
-			trimmed := strings.TrimLeft(name, " ")
-			spacesCount := len(name) - len(trimmed)
-
-			// Check for hierarchy markers in the actual name (L, L.., L..., etc.)
-			if strings.HasPrefix(trimmed, "L") {
-				// Extract the hierarchy marker (L, L.., L..., etc.)
-				parts := strings.SplitN(trimmed, " ", 2)
-				if len(parts) == 2 {
-					hierarchyMarker := parts[0]
-					actualName := parts[1]
-
-					// Build hierarchy prefix based on the marker, replace L.. with   L
-					if hierarchyMarker == "L.." {
-						hierarchyPrefix = "  L "
-					} else {
-						hierarchyPrefix = hierarchyMarker + " "
-					}
-					name = actualName
-				} else {
-					// Fallback to space-based hierarchy if no marker found
-					if spacesCount > 0 {
-						if spacesCount == 1 {
-							hierarchyPrefix = "L "
-						} else {
-							// For deeper levels, use   L pattern instead of L..
-							hierarchyPrefix = "  L "
-						}
-					}
-					name = trimmed
-				}
-			} else {
-				// Fallback to space-based hierarchy if no L marker found
-				if spacesCount > 0 {
-					if spacesCount == 1 {
-						hierarchyPrefix = "L "
-					} else {
-						// For deeper levels, use   L pattern instead of L..
-						hierarchyPrefix = "  L "
-					}
-				}
-				name = trimmed
-			}
-		}
+		// Extract hierarchy prefix and actual name
+		hierarchyPrefix, name := extractHierarchyInfo(r.Name)
 
 		// Format: age hierarchyPrefix [Kind] name
 		formattedAge := formatAge(r.Age)
@@ -206,9 +190,10 @@ func displayResourceTable(output *kapp.KappInspectOutput) error {
 
 		// If there's reconcile info and it's not ok/empty, show it as a warning
 		if r.ReconcileInfo != "" && r.ReconcileInfo != "-" {
-			// Calculate warning indentation based on hierarchy level minus 2 spaces
+			// Calculate warning indentation to align with resource name column
 			// Base indentation: 3 chars for age + 1 space = 4 chars
-			// Plus the length of the hierarchy prefix, minus 2 spaces
+			// Plus the length of the hierarchy prefix (e.g., "L ", "  L ")
+			// Minus 2 to account for the "⚠ : " prefix characters
 			warningIndent := 4 + len(hierarchyPrefix) - 2
 			if warningIndent < 0 {
 				warningIndent = 0
