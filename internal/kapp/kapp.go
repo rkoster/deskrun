@@ -1,14 +1,10 @@
 package kapp
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
-
-	kappcmd "carvel.dev/kapp/pkg/kapp/cmd"
-	"github.com/cppforlife/go-cli-ui/ui"
 )
 
 // Client provides an interface for kapp and ytt operations
@@ -72,16 +68,8 @@ func (c *Client) ProcessTemplate(templateDir string, dataValuesPath string) (str
 
 // Deploy deploys resources using kapp
 func (c *Client) Deploy(appName string, manifestPath string) error {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
-	// Set the command args
-	kappCommand.SetArgs([]string{
+	// Use os/exec to run kapp directly
+	cmd := exec.Command("kapp",
 		"deploy",
 		"-a", appName,
 		"-f", manifestPath,
@@ -90,15 +78,11 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 		"-y", // auto-confirm
 		"--color=false",
 		"--tty=false",
-	})
+	)
 
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		return fmt.Errorf("kapp deploy failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("kapp deploy failed: %w\noutput: %s", err, string(output))
 	}
 
 	return nil
@@ -106,16 +90,8 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 
 // Delete deletes an app using kapp
 func (c *Client) Delete(appName string) error {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
-	// Set the command args
-	kappCommand.SetArgs([]string{
+	// Use os/exec to run kapp directly
+	cmd := exec.Command("kapp",
 		"delete",
 		"-a", appName,
 		"--kubeconfig-context", c.kubeconfig,
@@ -123,15 +99,11 @@ func (c *Client) Delete(appName string) error {
 		"-y", // auto-confirm
 		"--color=false",
 		"--tty=false",
-	})
+	)
 
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		return fmt.Errorf("kapp delete failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("kapp delete failed: %w\noutput: %s", err, string(output))
 	}
 
 	return nil
@@ -154,40 +126,33 @@ type KappListOutput struct {
 
 // List lists all kapp apps using JSON output for reliable parsing
 func (c *Client) List() ([]string, error) {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
-	// Set the command args with --json flag for structured output
-	kappCommand.SetArgs([]string{
+	// Use os/exec to run kapp directly, similar to how ProcessTemplate uses ytt
+	cmd := exec.Command("kapp",
 		"list",
 		"--kubeconfig-context", c.kubeconfig,
 		"-n", c.namespace,
 		"--json",
 		"--color=false",
 		"--tty=false",
-	})
+	)
 
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
-
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		// If namespace doesn't exist, return empty list
-		if strings.Contains(errBuf.String(), "not found") {
-			return []string{}, nil
+	output, err := cmd.Output()
+	if err != nil {
+		// Get stderr for better error reporting
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr := string(exitErr.Stderr)
+			// If namespace doesn't exist, return empty list
+			if strings.Contains(stderr, "not found") {
+				return []string{}, nil
+			}
+			return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, stderr)
 		}
-		return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, errBuf.String())
+		return nil, fmt.Errorf("kapp list failed: %w", err)
 	}
 
 	// Parse JSON output
 	var listOutput KappListOutput
-	if err := json.Unmarshal([]byte(outBuf.String()), &listOutput); err != nil {
+	if err := json.Unmarshal(output, &listOutput); err != nil {
 		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w", err)
 	}
 
@@ -206,14 +171,6 @@ func (c *Client) List() ([]string, error) {
 
 // inspectWithFlags is a helper method that executes kapp inspect with custom flags
 func (c *Client) inspectWithFlags(appName string, flags []string) (string, error) {
-	// Create a buffer to capture output
-	var outBuf, errBuf bytes.Buffer
-	confUI := ui.NewConfUI(ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-
-	// Create the kapp command
-	kappCommand := kappcmd.NewDefaultKappCmd(confUI)
-
 	// Build the full command args
 	baseArgs := []string{
 		"inspect",
@@ -223,18 +180,21 @@ func (c *Client) inspectWithFlags(appName string, flags []string) (string, error
 		"--color=false",
 		"--tty=false",
 	}
-	kappCommand.SetArgs(append(baseArgs, flags...))
+	args := append(baseArgs, flags...)
 
-	// Capture output
-	kappCommand.SetOut(&outBuf)
-	kappCommand.SetErr(&errBuf)
+	// Use os/exec to run kapp directly
+	cmd := exec.Command("kapp", args...)
 
-	// Execute the command
-	if err := kappCommand.Execute(); err != nil {
-		return "", fmt.Errorf("kapp inspect failed: %w\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
+	output, err := cmd.Output()
+	if err != nil {
+		// Get stderr for better error reporting
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("kapp inspect failed: %w", err)
 	}
 
-	return outBuf.String(), nil
+	return string(output), nil
 }
 
 // InspectJSON gets the JSON output from kapp inspect with tree hierarchy and parses it

@@ -109,13 +109,30 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// formatAge ensures age values are always 3 characters by adding leading zeros
+func formatAge(age string) string {
+	if len(age) >= 3 {
+		return age
+	}
+	// Add leading zero for single digit values
+	if len(age) == 2 {
+		return "0" + age
+	}
+	// For very short values, pad appropriately
+	if len(age) == 1 {
+		return "00" + age
+	}
+	return age
+}
+
 // displayResourceTable creates and displays a custom table from kapp JSON output
 // Output format:
 // 23h [RoleBinding] rubionic-workspace-1-gha-rs-kube-mode
 // 23h [AutoscalingRunnerSet] rubionic-workspace-1
 // 23h  L [AutoscalingListener] rubionic-workspace-1-6cd58d58-listener
 // 22h  L.. [EphemeralRunner] rubionic-workspace-1-2zgjv-runner-6mckt
-//        ⚠ | Waiting on finalizers: ephemeralrunner.actions.github.com/finalizer
+//
+//	⚠ | Waiting on finalizers: ephemeralrunner.actions.github.com/finalizer
 func displayResourceTable(output *kapp.KappInspectOutput) error {
 	if len(output.Tables) == 0 {
 		return fmt.Errorf("no tables in kapp output")
@@ -135,35 +152,74 @@ func displayResourceTable(output *kapp.KappInspectOutput) error {
 		// Extract hierarchy prefix from name (L, L.., etc.)
 		name := r.Name
 		hierarchyPrefix := ""
-		
+
 		// Check if name starts with spaces (indicating hierarchy)
 		if strings.HasPrefix(name, " ") {
 			// Count leading spaces and extract hierarchy markers
 			trimmed := strings.TrimLeft(name, " ")
 			spacesCount := len(name) - len(trimmed)
-			
-			// In tree output, hierarchy is indicated by leading spaces
-			// Typically: 1 space = L, 2 spaces = L.., etc.
-			if spacesCount > 0 {
-				hierarchyPrefix = " L"
-				if spacesCount > 1 {
-					hierarchyPrefix += strings.Repeat(".", spacesCount-1)
+
+			// Check for hierarchy markers in the actual name (L, L.., L..., etc.)
+			if strings.HasPrefix(trimmed, "L") {
+				// Extract the hierarchy marker (L, L.., L..., etc.)
+				parts := strings.SplitN(trimmed, " ", 2)
+				if len(parts) == 2 {
+					hierarchyMarker := parts[0]
+					actualName := parts[1]
+
+					// Build hierarchy prefix based on the marker, replace L.. with   L
+					if hierarchyMarker == "L.." {
+						hierarchyPrefix = "  L "
+					} else {
+						hierarchyPrefix = hierarchyMarker + " "
+					}
+					name = actualName
+				} else {
+					// Fallback to space-based hierarchy if no marker found
+					if spacesCount > 0 {
+						if spacesCount == 1 {
+							hierarchyPrefix = "L "
+						} else {
+							// For deeper levels, use   L pattern instead of L..
+							hierarchyPrefix = "  L "
+						}
+					}
+					name = trimmed
 				}
-				hierarchyPrefix += " "
+			} else {
+				// Fallback to space-based hierarchy if no L marker found
+				if spacesCount > 0 {
+					if spacesCount == 1 {
+						hierarchyPrefix = "L "
+					} else {
+						// For deeper levels, use   L pattern instead of L..
+						hierarchyPrefix = "  L "
+					}
+				}
+				name = trimmed
 			}
-			name = trimmed
 		}
 
 		// Format: age hierarchyPrefix [Kind] name
-		fmt.Printf("%s %s[%s] %s\n", r.Age, hierarchyPrefix, r.Kind, name)
+		formattedAge := formatAge(r.Age)
+		fmt.Printf("%s %s[%s] %s\n", formattedAge, hierarchyPrefix, r.Kind, name)
 
 		// If there's reconcile info and it's not ok/empty, show it as a warning
 		if r.ReconcileInfo != "" && r.ReconcileInfo != "-" {
+			// Calculate warning indentation based on hierarchy level minus 2 spaces
+			// Base indentation: 3 chars for age + 1 space = 4 chars
+			// Plus the length of the hierarchy prefix, minus 2 spaces
+			warningIndent := 4 + len(hierarchyPrefix) - 2
+			if warningIndent < 0 {
+				warningIndent = 0
+			}
+			warningPrefix := strings.Repeat(" ", warningIndent)
+
 			// Handle multi-line reconcile info
 			riLines := strings.Split(r.ReconcileInfo, "\n")
 			for _, line := range riLines {
 				if line != "" {
-					fmt.Printf("       ⚠ | %s\n", line)
+					fmt.Printf("%s⚠ : %s\n", warningPrefix, line)
 				}
 			}
 		}
