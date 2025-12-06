@@ -431,33 +431,17 @@ func (m *Manager) Uninstall(ctx context.Context, name string) error {
 
 // List returns all runner scale sets
 func (m *Manager) List(ctx context.Context) ([]string, error) {
-	// Instead of using kapp list, query AutoscalingRunnerSet resources directly
-	// since they represent our deployed runners
-	dynamicClient, err := m.getDynamicClient()
+	// List kapp apps since the status command uses kapp inspect
+	kappClient := m.getKappClient()
+	appNames, err := kappClient.List()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
+		return nil, fmt.Errorf("failed to list kapp apps: %w", err)
 	}
 
-	// Define the AutoscalingRunnerSet GVR
-	gvr := schema.GroupVersionResource{
-		Group:    "actions.github.com",
-		Version:  "v1alpha1",
-		Resource: "autoscalingrunnersets",
-	}
-
-	// List AutoscalingRunnerSet resources in the arc-systems namespace
-	list, err := dynamicClient.Resource(gvr).Namespace(defaultNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		// If there's an error accessing the resources, return empty list with a note
-		// This handles cases where the CRD isn't installed yet or permissions are missing
-		return []string{}, nil
-	}
-
+	// Filter out the controller app to only show runner apps
 	var runnerNames []string
-	for _, item := range list.Items {
-		name := item.GetName()
-		// Filter out any potential non-runner resources
-		if name != "" && name != arcControllerAppName {
+	for _, name := range appNames {
+		if name != arcControllerAppName {
 			runnerNames = append(runnerNames, name)
 		}
 	}
@@ -465,29 +449,7 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 	return runnerNames, nil
 }
 
-// Status returns the status of a runner installation
-// Note: This method is kept for backward compatibility but the main status
-// command now uses InspectJSON directly for custom table formatting.
-func (m *Manager) Status(ctx context.Context, name string) (string, error) {
-	kappClient := m.getKappClient()
 
-	// Get JSON output from kapp inspect
-	inspectOutput, err := kappClient.InspectJSON(name)
-	if err != nil {
-		return "", fmt.Errorf("failed to get status: %w", err)
-	}
-
-	// Build a simple status string from JSON data
-	statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
-
-	// Add resource count
-	if len(inspectOutput.Tables) > 0 {
-		resourceCount := len(inspectOutput.Tables[0].Rows)
-		statusStr += fmt.Sprintf("Resources: %d\n", resourceCount)
-	}
-
-	return statusStr, nil
-}
 
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
 	clientset, err := m.getKubernetesClient()

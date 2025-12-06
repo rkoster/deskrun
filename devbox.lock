@@ -193,6 +193,54 @@
         }
       }
     },
+    "kapp@latest": {
+      "last_modified": "2025-11-23T21:50:36Z",
+      "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#kapp",
+      "source": "devbox-search",
+      "version": "0.64.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/xkh86gd80l15bi79wca2g7zfn342193r-kapp-0.64.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/xkh86gd80l15bi79wca2g7zfn342193r-kapp-0.64.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/9zickgrnhm1ska9s9slhmyrpchn8ralg-kapp-0.64.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/9zickgrnhm1ska9s9slhmyrpchn8ralg-kapp-0.64.2"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/g1yc54paf33097zzgb3sqyksplr4zbx4-kapp-0.64.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/g1yc54paf33097zzgb3sqyksplr4zbx4-kapp-0.64.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/4d76zyjw9mcfp7hm4b6gcykgdm9g3jya-kapp-0.64.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/4d76zyjw9mcfp7hm4b6gcykgdm9g3jya-kapp-0.64.2"
+        }
+      }
+    },
     "kubernetes-helm@latest": {
       "last_modified": "2025-11-23T21:50:36Z",
       "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#kubernetes-helm",

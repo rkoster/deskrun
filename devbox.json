@@ -4,7 +4,8 @@
     "gnumake@latest",
     "go@latest",
     "kubernetes-helm@latest",
-    "gh@latest"
+    "gh@latest",
+    "kapp@latest"
   ],
   "shell": {
     "init_hook": [
