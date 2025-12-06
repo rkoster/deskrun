@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Client provides an interface for kapp and ytt operations
+// Client provides an interface for kapp operations
 type Client struct {
 	kubeconfig string
 	namespace  string
@@ -42,28 +42,6 @@ func NewClient(kubeconfig, namespace string) *Client {
 		kubeconfig: kubeconfig,
 		namespace:  namespace,
 	}
-}
-
-// ProcessTemplate executes ytt to process templates with data values
-func (c *Client) ProcessTemplate(templateDir string, dataValuesPath string) (string, error) {
-	// Use os/exec to run ytt directly, as the ytt library seems to have output redirection issues
-	cmd := exec.Command("ytt",
-		"-f", templateDir,
-		"--data-values-file", dataValuesPath,
-	)
-
-	output, err := cmd.Output()
-	if err != nil {
-		// Get stderr for better error reporting
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("ytt failed: %w\nstderr: %s", err, string(exitErr.Stderr))
-		}
-		return "", fmt.Errorf("ytt failed: %w", err)
-	}
-
-	result := string(output)
-
-	return result, nil
 }
 
 // Deploy deploys resources using kapp
@@ -126,7 +104,7 @@ type KappListOutput struct {
 
 // List lists all kapp apps using JSON output for reliable parsing
 func (c *Client) List() ([]string, error) {
-	// Use os/exec to run kapp directly, similar to how ProcessTemplate uses ytt
+	// Use os/exec to run kapp directly
 	cmd := exec.Command("kapp",
 		"list",
 		"--kubeconfig-context", c.kubeconfig,
