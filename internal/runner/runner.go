@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -50,14 +48,9 @@ func NewManager(clusterManager *cluster.Manager) *Manager {
 	}
 }
 
-// GetKappClient returns a kapp client configured for the current cluster
-func (m *Manager) GetKappClient() *kapp.Client {
-	return kapp.NewClient(m.clusterManager.GetKubeconfig(), defaultNamespace)
-}
-
 // getKappClient returns a kapp client configured for the current cluster
 func (m *Manager) getKappClient() *kapp.Client {
-	return m.GetKappClient()
+	return kapp.NewClient(m.clusterManager.GetKubeconfig(), defaultNamespace)
 }
 
 // customWarningHandler is a warning handler that filters out unrecognized format warnings
@@ -473,92 +466,27 @@ func (m *Manager) List(ctx context.Context) ([]string, error) {
 }
 
 // Status returns the status of a runner installation
+// Note: This method is kept for backward compatibility but the main status
+// command now uses InspectJSON directly for custom table formatting.
 func (m *Manager) Status(ctx context.Context, name string) (string, error) {
 	kappClient := m.getKappClient()
 
-	// First try single instance (name as-is)
-	inspectOutput, err := kappClient.InspectWithTree(name)
-	if err == nil {
-		// Single instance found
-		statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
-
-		arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, name)
-		if err != nil {
-			return statusStr + inspectOutput, nil
-		}
-
-		return fmt.Sprintf("%s\nKubernetes Resources:\n%s\n\nkapp Details:\n%s", statusStr, arsStatus, inspectOutput), nil
-	}
-
-	// Check if the error indicates the app doesn't exist
-	if !strings.Contains(err.Error(), "does not exist") {
-		// Some other error occurred
+	// Get JSON output from kapp inspect
+	inspectOutput, err := kappClient.InspectJSON(name)
+	if err != nil {
 		return "", fmt.Errorf("failed to get status: %w", err)
 	}
 
-	// Single instance not found, try to find multiple instances directly via ConfigMaps
-	// Kapp stores app state in ConfigMaps with the app name
-	clientset, err := m.getKubernetesClient()
-	if err != nil {
-		return "", fmt.Errorf("failed to get kubernetes client: %w", err)
+	// Build a simple status string from JSON data
+	statusStr := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\nMANAGED BY: kapp\n\n", name, defaultNamespace)
+
+	// Add resource count
+	if len(inspectOutput.Tables) > 0 {
+		resourceCount := len(inspectOutput.Tables[0].Rows)
+		statusStr += fmt.Sprintf("Resources: %d\n", resourceCount)
 	}
 
-	configMaps, err := clientset.CoreV1().ConfigMaps(defaultNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to list ConfigMaps: %w", err)
-	}
-
-	// Look for instances with pattern name-1, name-2, etc.
-	var instanceNames []string
-	for _, configMap := range configMaps.Items {
-		cmName := configMap.Name
-		// Skip change tracking ConfigMaps
-		if strings.Contains(cmName, "-change-") {
-			continue
-		}
-		// Check if it matches our pattern
-		if strings.HasPrefix(cmName, name+"-") {
-			// Check if suffix is a number
-			suffix := strings.TrimPrefix(cmName, name+"-")
-			if _, err := strconv.Atoi(suffix); err == nil {
-				instanceNames = append(instanceNames, cmName)
-			}
-		}
-	}
-
-	if len(instanceNames) == 0 {
-		return "", fmt.Errorf("failed to get status: kapp inspect failed: App '%s' (namespace: %s) does not exist", name, defaultNamespace)
-	}
-
-	// Sort instance names for consistent output
-	sort.Strings(instanceNames)
-
-	// Show status for all instances
-	var results []string
-	statusHeader := fmt.Sprintf("NAME: %s (Multi-instance)\nNAMESPACE: %s\nMANAGED BY: kapp\nINSTANCES: %d\n",
-		name, defaultNamespace, len(instanceNames))
-
-	for _, instanceName := range instanceNames {
-		results = append(results, fmt.Sprintf("=== Instance: %s ===", instanceName))
-
-		inspectOutput, err := kappClient.InspectWithTree(instanceName)
-		if err != nil {
-			results = append(results, fmt.Sprintf("Error inspecting %s: %v", instanceName, err))
-			continue
-		}
-
-		arsStatus, err := m.getAutoscalingRunnerSetStatus(ctx, defaultNamespace, instanceName)
-		if err != nil {
-			results = append(results, fmt.Sprintf("Kubernetes Resources: Error getting status: %v", err))
-		} else {
-			results = append(results, fmt.Sprintf("Kubernetes Resources:\n%s", arsStatus))
-		}
-
-		results = append(results, fmt.Sprintf("kapp Details:\n%s", inspectOutput))
-		results = append(results, "") // Empty line between instances
-	}
-
-	return statusHeader + "\n" + strings.Join(results, "\n"), nil
+	return statusStr, nil
 }
 
 func (m *Manager) createNamespace(ctx context.Context, namespace string) error {

@@ -222,17 +222,7 @@ func (c *Client) inspectWithFlags(appName string, flags []string) (string, error
 	return outBuf.String(), nil
 }
 
-// Inspect inspects a kapp app
-func (c *Client) Inspect(appName string) (string, error) {
-	return c.inspectWithFlags(appName, []string{"--json"})
-}
-
-// InspectWithTree inspects a kapp app with tree output showing resource hierarchy
-func (c *Client) InspectWithTree(appName string) (string, error) {
-	return c.inspectWithFlags(appName, []string{"--tree"})
-}
-
-// InspectJSON gets the JSON output from kapp inspect
+// InspectJSON gets the JSON output from kapp inspect and parses it
 func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	output, err := c.inspectWithFlags(appName, []string{"--json"})
 	if err != nil {
@@ -246,28 +236,4 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	}
 
 	return &kappOutput, nil
-}
-
-// InspectTreeRaw gets the raw tree output from kapp inspect (just the clean resource lines)
-func (c *Client) InspectTreeRaw(appName string) ([]string, error) {
-	output, err := c.inspectWithFlags(appName, []string{"--tree"})
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse just the resource lines (skip headers/footers)
-	lines := strings.Split(output, "\n")
-	var resourceLines []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Keep lines that look like resources (start with namespace or have tree indicators)
-		if trimmed != "" && (strings.HasPrefix(line, c.namespace) ||
-			strings.Contains(line, " L ") || strings.Contains(line, " L..") ||
-			strings.Contains(line, "\tL ") || strings.Contains(line, "\tL..")) {
-			resourceLines = append(resourceLines, line)
-		}
-	}
-
-	return resourceLines, nil
 }

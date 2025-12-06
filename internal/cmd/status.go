@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rkoster/deskrun/internal/cluster"
 	"github.com/rkoster/deskrun/internal/config"
+	"github.com/rkoster/deskrun/internal/kapp"
 	"github.com/rkoster/deskrun/internal/runner"
 	"github.com/rkoster/deskrun/pkg/types"
 	"github.com/spf13/cobra"
@@ -60,41 +62,29 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	runnerMgr := runner.NewManager(clusterMgr)
 
-	// Check if specific runner name was provided
+	// Determine which runners to show
+	var names []string
 	if len(args) > 0 {
-		// Show status for specific runner
-		name := args[0]
-		
-		// Add runner header
-		fmt.Printf("Runner: %s\n", name)
-
-		// Get kapp client to directly call InspectTreeRaw
-		kappClient := runnerMgr.GetKappClient()
-		treeLines, err := kappClient.InspectTreeRaw(name)
+		// Show specific runner
+		names = []string{args[0]}
+	} else {
+		// Show all runners
+		var err error
+		names, err = runnerMgr.List(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to get status for %s: %w", name, err)
+			return fmt.Errorf("failed to list runners: %w", err)
 		}
 
-		// Print the clean tree lines
-		for _, line := range treeLines {
-			fmt.Println(line)
+		if len(names) == 0 {
+			fmt.Println("No runners found in cluster")
+			return nil
 		}
-
-		return nil
 	}
 
-	// Show all runners with tree output
-	names, err := runnerMgr.List(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list runners: %w", err)
-	}
+	// Get kapp client once
+	kappClient := kapp.NewClient(clusterMgr.GetKubeconfig(), "arc-systems")
 
-	if len(names) == 0 {
-		fmt.Println("No runners found in cluster")
-		return nil
-	}
-
-	fmt.Println("Runners in cluster:")
+	// Display status for each runner using the same logic
 	for i, name := range names {
 		if i > 0 {
 			fmt.Println() // Add blank line between runners
@@ -103,19 +93,109 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		// Add runner header
 		fmt.Printf("Runner: %s\n", name)
 
-		// Get kapp client to directly call InspectTreeRaw
-		kappClient := runnerMgr.GetKappClient()
-		treeLines, err := kappClient.InspectTreeRaw(name)
+		// Get JSON output from kapp
+		inspectOutput, err := kappClient.InspectJSON(name)
 		if err != nil {
 			fmt.Printf("Error getting status for %s: %v\n", name, err)
 			continue
 		}
 
-		// Print the clean tree lines
-		for _, line := range treeLines {
-			fmt.Println(line)
+		// Display resources in custom table format
+		if err := displayResourceTable(inspectOutput); err != nil {
+			fmt.Printf("Error displaying resources for %s: %v\n", name, err)
 		}
 	}
+
+	return nil
+}
+
+// displayResourceTable creates and displays a custom table from kapp JSON output
+func displayResourceTable(output *kapp.KappInspectOutput) error {
+	if len(output.Tables) == 0 {
+		return fmt.Errorf("no tables in kapp output")
+	}
+
+	// Get the resources table (usually the first table)
+	table := output.Tables[0]
+	resources := table.Rows
+
+	if len(resources) == 0 {
+		fmt.Println("No resources found")
+		return nil
+	}
+
+	// Calculate column widths
+	maxNamespace := len("Namespace")
+	maxName := len("Name")
+	maxKind := len("Kind")
+	maxOwner := len("Owner")
+	maxRs := len("Rs")
+	maxRi := len("Ri")
+
+	for _, r := range resources {
+		if len(r.Namespace) > maxNamespace {
+			maxNamespace = len(r.Namespace)
+		}
+		if len(r.Name) > maxName {
+			maxName = len(r.Name)
+		}
+		if len(r.Kind) > maxKind {
+			maxKind = len(r.Kind)
+		}
+		if len(r.Owner) > maxOwner {
+			maxOwner = len(r.Owner)
+		}
+		if len(r.ReconcileState) > maxRs {
+			maxRs = len(r.ReconcileState)
+		}
+		// ReconcileInfo can be multi-line, handle first line for width calculation
+		firstLine := strings.Split(r.ReconcileInfo, "\n")[0]
+		if len(firstLine) > maxRi {
+			maxRi = len(firstLine)
+		}
+	}
+
+	// Print header
+	fmt.Printf("%-*s  %-*s  %-*s  %-*s  %-*s  %s\n",
+		maxNamespace, "Namespace",
+		maxName, "Name",
+		maxKind, "Kind",
+		maxOwner, "Owner",
+		maxRs, "Rs",
+		"Ri")
+
+	// Print resources
+	for _, r := range resources {
+		// Handle multi-line reconcile info
+		riLines := strings.Split(r.ReconcileInfo, "\n")
+		firstRi := "-"
+		if len(riLines) > 0 && riLines[0] != "" {
+			firstRi = riLines[0]
+		}
+
+		// Print first line with all columns
+		fmt.Printf("%-*s  %-*s  %-*s  %-*s  %-*s  %s\n",
+			maxNamespace, r.Namespace,
+			maxName, r.Name,
+			maxKind, r.Kind,
+			maxOwner, r.Owner,
+			maxRs, r.ReconcileState,
+			firstRi)
+
+		// Print additional reconcile info lines if present
+		for i := 1; i < len(riLines); i++ {
+			if riLines[i] != "" {
+				// Indent to align with Ri column
+				indent := maxNamespace + maxName + maxKind + maxOwner + maxRs + 10
+				fmt.Printf("%*s%s\n", indent, "", riLines[i])
+			}
+		}
+	}
+
+	// Print footer
+	fmt.Printf("\nRs: Reconcile state\n")
+	fmt.Printf("Ri: Reconcile information\n")
+	fmt.Printf("\n%d resources\n", len(resources))
 
 	return nil
 }
