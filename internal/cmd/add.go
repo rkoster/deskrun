@@ -87,8 +87,12 @@ func init() {
 	addCmd.Flags().StringVar(&addAuthValue, "auth-value", "", "Authentication value (PAT token or GitHub App private key)")
 	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Cache paths to mount. Format: target or src:target (can be specified multiple times)")
 
-	addCmd.MarkFlagRequired("repository")
-	addCmd.MarkFlagRequired("auth-value")
+	if err := addCmd.MarkFlagRequired("repository"); err != nil {
+		panic(err)
+	}
+	if err := addCmd.MarkFlagRequired("auth-value"); err != nil {
+		panic(err)
+	}
 
 	rootCmd.AddCommand(addCmd)
 }

@@ -16,10 +16,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -32,8 +30,6 @@ const (
 	defaultNamespace       = "arc-systems"
 	arcControllerNamespace = "arc-systems"
 	arcControllerAppName   = "arc-controller"
-	// kapp app naming for runner scale sets
-	kappAppLabelKey = "kapp.k14s.io/app"
 )
 
 // Manager handles runner operations
@@ -167,118 +163,6 @@ func (m *Manager) applyConfigMapFromYAML(ctx context.Context, yamlContent string
 	return nil
 }
 
-// applyManifestFromHelm applies a Helm-generated manifest
-func (m *Manager) applyManifestFromHelm(ctx context.Context, manifestData string) error {
-	dynamicClient, err := m.getDynamicClient()
-	if err != nil {
-		return err
-	}
-
-	// Split the manifest by "---" to handle multiple resources
-	resources := strings.Split(manifestData, "---")
-	appliedCount := 0
-	for _, resource := range resources {
-		resource = strings.TrimSpace(resource)
-		if resource == "" {
-			continue
-		}
-
-		// Parse the resource
-		var obj unstructured.Unstructured
-		if err := yaml.Unmarshal([]byte(resource), &obj); err != nil {
-			return fmt.Errorf("failed to unmarshal resource: %w\nResource:\n%s", err, resource)
-		}
-
-		if obj.GetKind() == "" {
-			continue // Skip empty resources
-		}
-		appliedCount++
-
-		// Get the GVR for the resource
-		gvr := schema.GroupVersionResource{
-			Group:    obj.GroupVersionKind().Group,
-			Version:  obj.GroupVersionKind().Version,
-			Resource: strings.ToLower(obj.GetKind()) + "s",
-		}
-
-		// Apply the resource
-		_, err = dynamicClient.Resource(gvr).Namespace(obj.GetNamespace()).Create(ctx, &obj, metav1.CreateOptions{})
-		if err != nil && !k8serrors.IsAlreadyExists(err) {
-			// Try to update if creation failed
-			_, err = dynamicClient.Resource(gvr).Namespace(obj.GetNamespace()).Update(ctx, &obj, metav1.UpdateOptions{})
-			if err != nil {
-				return fmt.Errorf("failed to apply resource %s/%s: %w", obj.GetKind(), obj.GetName(), err)
-			}
-		}
-	}
-
-	if appliedCount == 0 {
-		return fmt.Errorf("no resources were applied from manifest")
-	}
-
-	return nil
-}
-
-// patchAutoscalingRunnerSet patches an AutoscalingRunnerSet resource
-func (m *Manager) patchAutoscalingRunnerSet(ctx context.Context, namespace, name string, minRunners, maxRunners int) error {
-	dynamicClient, err := m.getDynamicClient()
-	if err != nil {
-		return err
-	}
-
-	// Define the GVR for AutoscalingRunnerSet
-	gvr := schema.GroupVersionResource{
-		Group:    "actions.github.com",
-		Version:  "v1alpha1",
-		Resource: "autoscalingrunnersets",
-	}
-
-	// Create the patch
-	patchData := []byte(fmt.Sprintf(`{"spec":{"minRunners":%d,"maxRunners":%d}}`, minRunners, maxRunners))
-
-	// Apply the patch
-	_, err = dynamicClient.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, patchData, metav1.PatchOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to patch AutoscalingRunnerSet: %w", err)
-	}
-
-	return nil
-}
-
-// getAutoscalingRunnerSetStatus gets the status of an AutoscalingRunnerSet
-func (m *Manager) getAutoscalingRunnerSetStatus(ctx context.Context, namespace, name string) (string, error) {
-	dynamicClient, err := m.getDynamicClient()
-	if err != nil {
-		return "", err
-	}
-
-	// Define the GVR for AutoscalingRunnerSet
-	gvr := schema.GroupVersionResource{
-		Group:    "actions.github.com",
-		Version:  "v1alpha1",
-		Resource: "autoscalingrunnersets",
-	}
-
-	// Get the resource
-	obj, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to get AutoscalingRunnerSet: %w", err)
-	}
-
-	// Format the output
-	status := fmt.Sprintf("NAME: %s\nNAMESPACE: %s\n", obj.GetName(), obj.GetNamespace())
-	if spec, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
-		if minRunners, found, _ := unstructured.NestedInt64(spec, "minRunners"); found {
-			status += fmt.Sprintf("MIN_RUNNERS: %d\n", minRunners)
-		}
-		if maxRunners, found, _ := unstructured.NestedInt64(spec, "maxRunners"); found {
-			status += fmt.Sprintf("MAX_RUNNERS: %d\n", maxRunners)
-		}
-	}
-
-	return status, nil
-}
-
 // crdExists checks if a CRD exists
 func (m *Manager) crdExists(ctx context.Context, crdName string) (bool, error) {
 	dynamicClient, err := m.getDynamicClient()
@@ -368,7 +252,7 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	fmt.Printf("  Installing runner scale set '%s'...\n", instanceName)
 
@@ -467,31 +351,6 @@ func (m *Manager) createNamespace(ctx context.Context, namespace string) error {
 	}
 
 	return nil
-}
-
-func (m *Manager) applyManifest(ctx context.Context, manifestPath string) error {
-	content, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return fmt.Errorf("failed to read manifest: %w", err)
-	}
-
-	return m.applyManifestFromHelm(ctx, string(content))
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr ||
-			s[len(s)-len(substr):] == substr ||
-			containsMiddle(s, substr)))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // generateYTTDataValues generates ytt data values for the runner scale set
@@ -698,15 +557,6 @@ data:
 	return hookExtension
 }
 
-// sanitizeVolumeName sanitutes a mount path to a valid Kubernetes volume name
-func sanitizeVolumeName(path string) string {
-	// Replace forward slashes and dots with hyphens, convert to lowercase
-	name := strings.ToLower(strings.Trim(path, "/"))
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, ".", "-")
-	return name
-}
-
 func (m *Manager) ensureARCController(ctx context.Context) error {
 	// Check if CRDs are already installed
 	exists, err := m.crdExists(ctx, "autoscalingrunnersets.actions.github.com")
@@ -726,7 +576,7 @@ func (m *Manager) ensureARCController(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Get controller template using the unified template package
 	// ProcessTemplate applies the overlay which adds required RBAC permissions

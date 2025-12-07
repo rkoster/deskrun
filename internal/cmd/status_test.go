@@ -16,18 +16,18 @@ var _ = Describe("Status Command Helpers", func() {
 			Entry("3 character age - unchanged", "10h", "10h"),
 			Entry("4 character age - unchanged", "100h", "100h"),
 			Entry("5+ character age - unchanged", "1000d", "1000d"),
-			
+
 			// 2-character ages get a leading zero
 			Entry("2 character age - single zero", "5s", "05s"),
 			Entry("2 character age - hours", "5h", "05h"),
 			Entry("2 character age - days", "5d", "05d"),
 			Entry("2 character age - 9s", "9s", "09s"),
-			
+
 			// 1-character ages get two leading zeros
 			Entry("1 character age", "5", "005"),
 			Entry("1 character age - 0", "0", "000"),
 			Entry("1 character age - 9", "9", "009"),
-			
+
 			// Edge cases
 			Entry("empty string", "", ""),
 		)
@@ -61,17 +61,17 @@ var _ = Describe("Status Command Helpers", func() {
 			Entry("name with dashes - no hierarchy",
 				"rubionic-workspace-1-gha-rs-kube-mode",
 				"", "rubionic-workspace-1-gha-rs-kube-mode"),
-			
+
 			// Single-level hierarchy with L marker
 			Entry("L marker - single level",
 				" L rubionic-workspace-1-listener",
 				"L ", "rubionic-workspace-1-listener"),
-			
+
 			// Double-level hierarchy with L.. marker (should convert to "  L ")
 			Entry("L.. marker - double level",
 				" L.. rubionic-workspace-1-runner-6mckt",
 				"  L ", "rubionic-workspace-1-runner-6mckt"),
-			
+
 			// Space-based hierarchy without markers
 			Entry("single space - no L marker",
 				" resource-name",
@@ -82,12 +82,12 @@ var _ = Describe("Status Command Helpers", func() {
 			Entry("triple space - no L marker",
 				"   resource-name",
 				"  L ", "resource-name"),
-			
+
 			// Edge cases with L marker but no name
 			Entry("L marker only - no name",
 				" L",
 				"", " L"),
-			
+
 			// Multiple levels beyond L..
 			Entry("L... marker (3 dots) - should use L... prefix",
 				" L... resource-name",

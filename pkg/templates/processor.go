@@ -301,7 +301,5 @@ func (p *Processor) parseYttError(err error, config Config) *TemplateError {
 		"containerMode": string(config.Installation.ContainerMode),
 		"repository":    config.Installation.Repository,
 	}
-	templateErr.WithContext(context)
-
-	return templateErr
+	return templateErr.WithContext(context)
 }
