@@ -147,6 +147,8 @@ func extractHierarchyInfo(name string) (hierarchyPrefix, actualName string) {
 			}
 			return hierarchyMarker + " ", parts[1]
 		}
+		// If L marker has no name after it, return the whole thing as the name
+		return "", name
 	}
 
 	// Fallback to space-based hierarchy

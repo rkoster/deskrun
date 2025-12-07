@@ -146,7 +146,7 @@ func (e *TemplateError) VerboseError() string {
 		result += fmt.Sprintf("\nYTT Output:\n%s\n", e.YttOutput)
 	}
 	if len(e.Context) > 0 {
-		result += fmt.Sprintf("\nConfiguration Context:\n")
+		result += "\nConfiguration Context:\n"
 		for k, v := range e.Context {
 			result += fmt.Sprintf("  %s: %v\n", k, v)
 		}
