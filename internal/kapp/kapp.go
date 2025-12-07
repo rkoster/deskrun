@@ -1,13 +1,18 @@
 package kapp
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+
+	cmdapp "carvel.dev/kapp/pkg/kapp/cmd/app"
+	cmdcore "carvel.dev/kapp/pkg/kapp/cmd/core"
+	"carvel.dev/kapp/pkg/kapp/logger"
+	"carvel.dev/kapp/pkg/kapp/preflight"
+	"github.com/cppforlife/go-cli-ui/ui"
 )
 
 // Client provides an interface for kapp operations
@@ -73,37 +78,60 @@ func NewClientWithUI(kubeconfig, namespace string, uiConfig UIConfig) *Client {
 
 // Deploy deploys resources using kapp
 func (c *Client) Deploy(appName string, manifestPath string) error {
-	// Build kapp command
-	args := []string{
-		"deploy",
-		"-a", appName,
-		"-f", manifestPath,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"-y", // auto-confirm
-		"--color=false",
-		"--tty=false",
-	}
-
-	// Execute with UI output capture
-	return c.execWithUI("kapp", args)
+	// Create a custom UI with the configured writers
+	confUI := c.createConfUI()
+	
+	// Create kapp dependencies
+	configFactory := cmdcore.NewConfigFactoryImpl()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+	preflights := preflight.NewRegistry(map[string]preflight.Check{})
+	
+	// Configure kubeconfig context
+	configFactory.ConfigureContextResolver(func() (string, error) { 
+		return c.kubeconfig, nil
+	})
+	
+	// Create deploy options
+	deployOpts := cmdapp.NewDeployOptions(confUI, depsFactory, logger.NewUILogger(confUI), preflights)
+	
+	// Set the required flags programmatically
+	deployOpts.AppFlags.Name = appName
+	deployOpts.AppFlags.NamespaceFlags.Name = c.namespace
+	deployOpts.FileFlags.Files = []string{manifestPath}
+	
+	// Enable non-interactive mode
+	confUI.EnableNonInteractive()
+	
+	// Execute deploy
+	return deployOpts.Run()
 }
 
 // Delete deletes an app using kapp
 func (c *Client) Delete(appName string) error {
-	// Build kapp command
-	args := []string{
-		"delete",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"-y", // auto-confirm
-		"--color=false",
-		"--tty=false",
-	}
-
-	// Execute with UI output capture
-	return c.execWithUI("kapp", args)
+	// Create a custom UI with the configured writers
+	confUI := c.createConfUI()
+	
+	// Create kapp dependencies
+	configFactory := cmdcore.NewConfigFactoryImpl()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+	
+	// Configure kubeconfig context
+	configFactory.ConfigureContextResolver(func() (string, error) { 
+		return c.kubeconfig, nil
+	})
+	
+	// Create delete options
+	deleteOpts := cmdapp.NewDeleteOptions(confUI, depsFactory, logger.NewUILogger(confUI))
+	
+	// Set the required flags programmatically
+	deleteOpts.AppFlags.Name = appName
+	deleteOpts.AppFlags.NamespaceFlags.Name = c.namespace
+	
+	// Enable non-interactive mode
+	confUI.EnableNonInteractive()
+	
+	// Execute delete
+	return deleteOpts.Run()
 }
 
 // KappListApp represents a single app from kapp list JSON output
@@ -210,37 +238,37 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	return &kappOutput, nil
 }
 
-// execWithUI executes a command and captures output through the UI configuration
-func (c *Client) execWithUI(command string, args []string) error {
-	// Create command
-	cmd := exec.Command(command, args...)
-
-	// Create buffers for stdout and stderr
-	var stdout, stderr bytes.Buffer
-
-	// If custom writers are provided, use them; otherwise use buffers
-	if c.uiConfig.Stdout != nil {
-		cmd.Stdout = c.uiConfig.Stdout
-	} else {
-		cmd.Stdout = &stdout
+// createConfUI creates a go-cli-ui ConfUI based on the client's UI configuration
+func (c *Client) createConfUI() *ui.ConfUI {
+	// Determine output and error writers
+	outWriter := c.uiConfig.Stdout
+	if outWriter == nil {
+		outWriter = os.Stdout
 	}
-
-	if c.uiConfig.Stderr != nil {
-		cmd.Stderr = c.uiConfig.Stderr
-	} else {
-		cmd.Stderr = &stderr
+	
+	errWriter := c.uiConfig.Stderr
+	if errWriter == nil {
+		errWriter = os.Stderr
 	}
-
-	// Execute command
-	err := cmd.Run()
-
-	// Handle errors - if using buffers, format error with stderr content
-	if err != nil {
-		if stderr.Len() > 0 {
-			return fmt.Errorf("%s failed: %w\nstderr: %s", command, err, stderr.String())
-		}
-		return fmt.Errorf("%s failed: %w", command, err)
+	
+	// Create a writer UI with custom writers
+	writerUI := ui.NewWriterUI(outWriter, errWriter, ui.NewNoopLogger())
+	
+	// Wrap in ConfUI for configuration
+	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
+	
+	// Apply UI configuration
+	if c.uiConfig.Color {
+		confUI.EnableColor()
 	}
-
-	return nil
+	
+	if c.uiConfig.JSON {
+		confUI.EnableJSON()
+	}
+	
+	if c.uiConfig.Silent {
+		confUI.EnableNonInteractive()
+	}
+	
+	return confUI
 }
