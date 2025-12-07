@@ -1,8 +1,11 @@
 package kapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -11,6 +14,7 @@ import (
 type Client struct {
 	kubeconfig string
 	namespace  string
+	uiConfig   UIConfig
 }
 
 // KappResource represents a single resource from kapp JSON output
@@ -36,18 +40,41 @@ type KappInspectOutput struct {
 	Tables []KappTable `json:"Tables"`
 }
 
-// NewClient creates a new kapp client
+// UIConfig holds configuration for UI behavior
+type UIConfig struct {
+	Stdout io.Writer
+	Stderr io.Writer
+	Silent bool   // Disable interactive prompts
+	Color  bool   // Enable color output
+	JSON   bool   // Output in JSON format
+	Debug  bool   // Enable debug logging
+}
+
+// NewClient creates a new kapp client with default UI configuration
 func NewClient(kubeconfig, namespace string) *Client {
+	return NewClientWithUI(kubeconfig, namespace, UIConfig{
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Silent: true,  // Non-interactive by default
+		Color:  false, // No color by default
+		JSON:   false,
+		Debug:  false,
+	})
+}
+
+// NewClientWithUI creates a new kapp client with custom UI configuration
+func NewClientWithUI(kubeconfig, namespace string, uiConfig UIConfig) *Client {
 	return &Client{
 		kubeconfig: kubeconfig,
 		namespace:  namespace,
+		uiConfig:   uiConfig,
 	}
 }
 
 // Deploy deploys resources using kapp
 func (c *Client) Deploy(appName string, manifestPath string) error {
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp",
+	// Build kapp command
+	args := []string{
 		"deploy",
 		"-a", appName,
 		"-f", manifestPath,
@@ -56,20 +83,16 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 		"-y", // auto-confirm
 		"--color=false",
 		"--tty=false",
-	)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("kapp deploy failed: %w\noutput: %s", err, string(output))
 	}
 
-	return nil
+	// Execute with UI output capture
+	return c.execWithUI("kapp", args)
 }
 
 // Delete deletes an app using kapp
 func (c *Client) Delete(appName string) error {
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp",
+	// Build kapp command
+	args := []string{
 		"delete",
 		"-a", appName,
 		"--kubeconfig-context", c.kubeconfig,
@@ -77,14 +100,10 @@ func (c *Client) Delete(appName string) error {
 		"-y", // auto-confirm
 		"--color=false",
 		"--tty=false",
-	)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("kapp delete failed: %w\noutput: %s", err, string(output))
 	}
 
-	return nil
+	// Execute with UI output capture
+	return c.execWithUI("kapp", args)
 }
 
 // KappListApp represents a single app from kapp list JSON output
@@ -189,4 +208,39 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	}
 
 	return &kappOutput, nil
+}
+
+// execWithUI executes a command and captures output through the UI configuration
+func (c *Client) execWithUI(command string, args []string) error {
+	// Create command
+	cmd := exec.Command(command, args...)
+
+	// Create buffers for stdout and stderr
+	var stdout, stderr bytes.Buffer
+
+	// If custom writers are provided, use them; otherwise use buffers
+	if c.uiConfig.Stdout != nil {
+		cmd.Stdout = c.uiConfig.Stdout
+	} else {
+		cmd.Stdout = &stdout
+	}
+
+	if c.uiConfig.Stderr != nil {
+		cmd.Stderr = c.uiConfig.Stderr
+	} else {
+		cmd.Stderr = &stderr
+	}
+
+	// Execute command
+	err := cmd.Run()
+
+	// Handle errors - if using buffers, format error with stderr content
+	if err != nil {
+		if stderr.Len() > 0 {
+			return fmt.Errorf("%s failed: %w\nstderr: %s", command, err, stderr.String())
+		}
+		return fmt.Errorf("%s failed: %w", command, err)
+	}
+
+	return nil
 }
