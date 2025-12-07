@@ -557,15 +557,6 @@ data:
 	return hookExtension
 }
 
-// sanitizeVolumeName sanitutes a mount path to a valid Kubernetes volume name
-func sanitizeVolumeName(path string) string {
-	// Replace forward slashes and dots with hyphens, convert to lowercase
-	name := strings.ToLower(strings.Trim(path, "/"))
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, ".", "-")
-	return name
-}
-
 func (m *Manager) ensureARCController(ctx context.Context) error {
 	// Check if CRDs are already installed
 	exists, err := m.crdExists(ctx, "autoscalingrunnersets.actions.github.com")
