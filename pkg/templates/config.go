@@ -129,8 +129,8 @@ func (e *TemplateError) Unwrap() error {
 
 // VerboseError returns a detailed error message for debugging
 func (e *TemplateError) VerboseError() string {
-	result := fmt.Sprintf("Template Processing Error\n")
-	result += fmt.Sprintf("========================\n")
+	result := "Template Processing Error\n"
+	result += "========================\n"
 	result += fmt.Sprintf("Type: %s\n", e.Type)
 	if e.Template != "" {
 		result += fmt.Sprintf("Template: %s\n", e.Template)

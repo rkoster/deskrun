@@ -14,12 +14,18 @@ func TestNewManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp home: %v", err)
 	}
-	defer os.RemoveAll(tmpHome)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
 
 	// Set HOME environment variable
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -44,11 +50,17 @@ func TestAddInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp home: %v", err)
 	}
-	defer os.RemoveAll(tmpHome)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -92,11 +104,17 @@ func TestRemoveInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp home: %v", err)
 	}
-	defer os.RemoveAll(tmpHome)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -141,11 +159,17 @@ func TestSaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp home: %v", err)
 	}
-	defer os.RemoveAll(tmpHome)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
 
 	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", oldHome)
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
 
 	// Create and save config
 	mgr1, err := NewManager()
