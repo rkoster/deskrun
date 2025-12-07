@@ -80,28 +80,28 @@ func NewClientWithUI(kubeconfig, namespace string, uiConfig UIConfig) *Client {
 func (c *Client) Deploy(appName string, manifestPath string) error {
 	// Create a custom UI with the configured writers
 	confUI := c.createConfUI()
-	
+
 	// Create kapp dependencies
 	configFactory := cmdcore.NewConfigFactoryImpl()
 	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
 	preflights := preflight.NewRegistry(map[string]preflight.Check{})
-	
+
 	// Configure kubeconfig context
-	configFactory.ConfigureContextResolver(func() (string, error) { 
+	configFactory.ConfigureContextResolver(func() (string, error) {
 		return c.kubeconfig, nil
 	})
-	
+
 	// Create deploy options
 	deployOpts := cmdapp.NewDeployOptions(confUI, depsFactory, logger.NewUILogger(confUI), preflights)
-	
+
 	// Set the required flags programmatically
 	deployOpts.AppFlags.Name = appName
 	deployOpts.AppFlags.NamespaceFlags.Name = c.namespace
 	deployOpts.FileFlags.Files = []string{manifestPath}
-	
+
 	// Enable non-interactive mode
 	confUI.EnableNonInteractive()
-	
+
 	// Execute deploy
 	return deployOpts.Run()
 }
@@ -110,26 +110,26 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 func (c *Client) Delete(appName string) error {
 	// Create a custom UI with the configured writers
 	confUI := c.createConfUI()
-	
+
 	// Create kapp dependencies
 	configFactory := cmdcore.NewConfigFactoryImpl()
 	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
-	
+
 	// Configure kubeconfig context
-	configFactory.ConfigureContextResolver(func() (string, error) { 
+	configFactory.ConfigureContextResolver(func() (string, error) {
 		return c.kubeconfig, nil
 	})
-	
+
 	// Create delete options
 	deleteOpts := cmdapp.NewDeleteOptions(confUI, depsFactory, logger.NewUILogger(confUI))
-	
+
 	// Set the required flags programmatically
 	deleteOpts.AppFlags.Name = appName
 	deleteOpts.AppFlags.NamespaceFlags.Name = c.namespace
-	
+
 	// Enable non-interactive mode
 	confUI.EnableNonInteractive()
-	
+
 	// Execute delete
 	return deleteOpts.Run()
 }
@@ -245,30 +245,30 @@ func (c *Client) createConfUI() *ui.ConfUI {
 	if outWriter == nil {
 		outWriter = os.Stdout
 	}
-	
+
 	errWriter := c.uiConfig.Stderr
 	if errWriter == nil {
 		errWriter = os.Stderr
 	}
-	
+
 	// Create a writer UI with custom writers
 	writerUI := ui.NewWriterUI(outWriter, errWriter, ui.NewNoopLogger())
-	
+
 	// Wrap in ConfUI for configuration
 	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
-	
+
 	// Apply UI configuration
 	if c.uiConfig.Color {
 		confUI.EnableColor()
 	}
-	
+
 	if c.uiConfig.JSON {
 		confUI.EnableJSON()
 	}
-	
+
 	if c.uiConfig.Silent {
 		confUI.EnableNonInteractive()
 	}
-	
+
 	return confUI
 }
