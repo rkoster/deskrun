@@ -17,19 +17,31 @@ import (
 // TestMatrix defines comprehensive test cases for all container modes and configurations
 var testMatrix = []struct {
 	name          string
+	templateType  TemplateType
 	containerMode types.ContainerMode
 	cachePaths    []types.CachePath
 	expectedFile  string
 }{
+	// Controller template test
+	{
+		name:          "controller-basic",
+		templateType:  TemplateTypeController,
+		containerMode: types.ContainerModeKubernetes,
+		cachePaths:    nil,
+		expectedFile:  "controller_basic.yaml",
+	},
+
 	// Kubernetes mode tests
 	{
 		name:          "kubernetes-basic",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModeKubernetes,
 		cachePaths:    nil,
 		expectedFile:  "kubernetes_basic.yaml",
 	},
 	{
 		name:          "kubernetes-with-cache",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModeKubernetes,
 		cachePaths: []types.CachePath{
 			{Source: "/var/lib/docker", Target: "/var/lib/docker"},
@@ -40,12 +52,14 @@ var testMatrix = []struct {
 	// Docker-in-Docker mode tests
 	{
 		name:          "dind-basic",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModeDinD,
 		cachePaths:    nil,
 		expectedFile:  "dind_basic.yaml",
 	},
 	{
 		name:          "dind-with-cache",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModeDinD,
 		cachePaths: []types.CachePath{
 			{Source: "/tmp/docker-cache", Target: "/var/lib/docker"},
@@ -56,12 +70,14 @@ var testMatrix = []struct {
 	// Privileged mode tests
 	{
 		name:          "privileged-basic",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModePrivileged,
 		cachePaths:    nil,
 		expectedFile:  "privileged_basic.yaml",
 	},
 	{
 		name:          "privileged-single-cache",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModePrivileged,
 		cachePaths: []types.CachePath{
 			{Source: "/var/lib/docker", Target: "/var/lib/docker"},
@@ -70,6 +86,7 @@ var testMatrix = []struct {
 	},
 	{
 		name:          "privileged-multi-cache",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModePrivileged,
 		cachePaths: []types.CachePath{
 			{Source: "/var/lib/docker", Target: "/var/lib/docker"},
@@ -79,6 +96,7 @@ var testMatrix = []struct {
 	},
 	{
 		name:          "privileged-emptydir-cache",
+		templateType:  TemplateTypeScaleSet,
 		containerMode: types.ContainerModePrivileged,
 		cachePaths: []types.CachePath{
 			{Source: "", Target: "/var/lib/docker"}, // Empty source = emptyDir
@@ -106,7 +124,7 @@ func TestProcessTemplate(t *testing.T) {
 				InstanceNum:  1,
 			}
 
-			actualYAML, err := processor.ProcessTemplate(TemplateTypeScaleSet, config)
+			actualYAML, err := processor.ProcessTemplate(tc.templateType, config)
 			require.NoError(t, err, "ProcessTemplate should not return an error")
 			require.NotEmpty(t, actualYAML, "Output should not be empty")
 
