@@ -55,7 +55,7 @@ func NewClient(kubeconfig, namespace string) *Client {
 	return NewClientWithUI(kubeconfig, namespace, UIConfig{
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
-		Silent: true,  // Non-interactive by default
+		Silent: true, // Non-interactive by default
 		Color:  false, // No color by default
 		JSON:   false,
 		Debug:  false,
