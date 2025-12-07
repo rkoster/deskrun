@@ -44,10 +44,10 @@ type KappInspectOutput struct {
 type UIConfig struct {
 	Stdout io.Writer
 	Stderr io.Writer
-	Silent bool   // Disable interactive prompts
-	Color  bool   // Enable color output
-	JSON   bool   // Output in JSON format
-	Debug  bool   // Enable debug logging
+	Silent bool // Disable interactive prompts
+	Color  bool // Enable color output
+	JSON   bool // Output in JSON format
+	Debug  bool // Enable debug logging
 }
 
 // NewClient creates a new kapp client with default UI configuration
@@ -55,7 +55,7 @@ func NewClient(kubeconfig, namespace string) *Client {
 	return NewClientWithUI(kubeconfig, namespace, UIConfig{
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
-		Silent: true, // Non-interactive by default
+		Silent: true,  // Non-interactive by default
 		Color:  false, // No color by default
 		JSON:   false,
 		Debug:  false,
