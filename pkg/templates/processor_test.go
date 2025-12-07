@@ -487,7 +487,7 @@ func TestControllerOverlayAddsListPermissionToSecrets(t *testing.T) {
 
 	// Verify secrets rule has 'list' verb (added by overlay)
 	assert.Contains(t, secretsRule.Verbs, "list", "secrets rule should have 'list' verb for EphemeralRunner finalization")
-	
+
 	// Also verify other expected verbs are present
 	assert.Contains(t, secretsRule.Verbs, "create", "secrets rule should have 'create' verb")
 	assert.Contains(t, secretsRule.Verbs, "delete", "secrets rule should have 'delete' verb")
