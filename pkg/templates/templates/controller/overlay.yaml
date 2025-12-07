@@ -27,3 +27,22 @@ rules:
   - list
   - patch
   - watch
+
+#! Add 'list' permission to secrets in manager_listener_role
+#! The ARC controller needs to list runner-linked secrets during EphemeralRunner finalization
+#! Without this permission, finalizers get stuck and resources cannot be properly cleaned up
+#! Original upstream has: create, delete, get, patch, update
+#! We need: create, delete, get, list, patch, update
+#@overlay/match by=overlay.subset({"kind": "Role", "metadata": {"name": "arc-controller-gha-rs-controller-listener"}})
+---
+rules:
+#@overlay/match by=overlay.subset({"resources": ["secrets"]})
+-
+  #@overlay/replace
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update

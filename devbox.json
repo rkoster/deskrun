@@ -6,7 +6,8 @@
     "kubernetes-helm@latest",
     "gh@latest",
     "kapp@latest",
-    "golangci-lint@latest"
+    "golangci-lint@latest",
+    "vendir@latest"
   ],
   "shell": {
     "init_hook": [

@@ -336,6 +336,54 @@
           "store_path": "/nix/store/b7g7s0jpfs93g7s1b556166mcswbkmcx-kubernetes-helm-3.19.1"
         }
       }
+    },
+    "vendir@latest": {
+      "last_modified": "2025-11-23T21:50:36Z",
+      "resolved": "github:NixOS/nixpkgs/ee09932cedcef15aaf476f9343d1dea2cb77e261#vendir",
+      "source": "devbox-search",
+      "version": "0.45.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8b2zf0k82qga1ihq8qd5wbkglv2wak0a-vendir-0.45.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/8b2zf0k82qga1ihq8qd5wbkglv2wak0a-vendir-0.45.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/y5bacmrnv5qcvwk7lqy62048s76jdrbv-vendir-0.45.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/y5bacmrnv5qcvwk7lqy62048s76jdrbv-vendir-0.45.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/blqp9hbyppywwrvd69h7jp573wa2ynxv-vendir-0.45.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/blqp9hbyppywwrvd69h7jp573wa2ynxv-vendir-0.45.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/fw2wfl80ry7840103br1axh0c7x9x9wn-vendir-0.45.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/fw2wfl80ry7840103br1axh0c7x9x9wn-vendir-0.45.0"
+        }
+      }
     }
   }
 }
