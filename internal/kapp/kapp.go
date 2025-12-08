@@ -239,6 +239,12 @@ func (c *Client) createConfigFactory() *cmdcore.ConfigFactoryImpl {
 		return c.kubeconfig, nil
 	})
 	
+	// Configure YAML resolver (required by kapp, but we don't use explicit YAML config)
+	configFactory.ConfigureYAMLResolver(func() (string, error) {
+		// Return empty string to use kubeconfig file instead of explicit YAML
+		return "", nil
+	})
+	
 	return configFactory
 }
 
