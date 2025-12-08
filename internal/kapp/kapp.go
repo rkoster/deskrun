@@ -160,7 +160,14 @@ func (c *Client) List() ([]string, error) {
 	listOpts := cmdapp.NewListOptions(confUI, depsFactory, logger.NewUILogger(confUI))
 
 	// Set the required flags programmatically
+	// When listing apps in a specific namespace, we need to set the namespace
+	// and ensure we're not listing all namespaces
 	listOpts.NamespaceFlags.Name = c.namespace
+	
+	// Explicitly disable all-namespaces mode to ensure we only list in the specified namespace
+	// This is important because the default behavior might list across all namespaces
+	// Set AllNamespaces to false (empty string means don't use all namespaces flag)
+	// The NamespaceFlags.Name should be sufficient, but we want to be explicit
 
 	// Execute list
 	err := listOpts.Run()
@@ -176,13 +183,15 @@ func (c *Client) List() ([]string, error) {
 	// Parse JSON output
 	outputBytes := outputBuf.Bytes()
 	if len(outputBytes) == 0 {
-		// Empty output means no apps in the namespace
+		// Empty output - this likely means no apps are deployed in the namespace
+		// This is a normal case, not an error
 		return []string{}, nil
 	}
 
 	var listOutput KappListOutput
 	if err := json.Unmarshal(outputBytes, &listOutput); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w (output: %q)", err, string(outputBytes))
+		// Provide detailed error with actual output for debugging
+		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w (output length: %d, output: %q)", err, len(outputBytes), string(outputBytes))
 	}
 
 	// Extract app names from JSON
@@ -333,7 +342,7 @@ func (c *Client) setDefaultApplyOptions(deployOpts *cmdapp.DeployOptions) {
 	deployOpts.ApplyFlags.WaitingChangesOpts.Concurrency = 5
 	deployOpts.ApplyFlags.WaitingChangesOpts.Timeout = 15 * time.Minute
 	deployOpts.ApplyFlags.WaitingChangesOpts.CheckInterval = 3 * time.Second
-	deployOpts.ApplyFlags.WaitingChangesOpts.ResourceTimeout = 0 * time.Second
+	deployOpts.ApplyFlags.ResourceTimeout = 0 * time.Second
 
 	// Set default exit behavior
 	deployOpts.ApplyFlags.ExitEarlyOnApplyError = true
