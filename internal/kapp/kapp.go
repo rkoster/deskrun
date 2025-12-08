@@ -1,11 +1,11 @@
 package kapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 
 	cmdapp "carvel.dev/kapp/pkg/kapp/cmd/app"
@@ -149,35 +149,45 @@ type KappListOutput struct {
 	Tables []KappListTable `json:"Tables"`
 }
 
-// List lists all kapp apps using JSON output for reliable parsing
+// List lists all kapp apps using the native kapp Go API
 func (c *Client) List() ([]string, error) {
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp",
-		"list",
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--json",
-		"--color=false",
-		"--tty=false",
-	)
+	// Create a buffer to capture JSON output
+	var outputBuf bytes.Buffer
 
-	output, err := cmd.Output()
+	// Create a temporary UI configuration with the buffer
+	writerUI := ui.NewWriterUI(&outputBuf, io.Discard, ui.NewNoopLogger())
+	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+	confUI.EnableJSON()
+
+	// Create kapp dependencies
+	configFactory := cmdcore.NewConfigFactoryImpl()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+
+	// Configure kubeconfig context
+	configFactory.ConfigureContextResolver(func() (string, error) {
+		return c.kubeconfig, nil
+	})
+
+	// Create list options
+	listOpts := cmdapp.NewListOptions(confUI, depsFactory, logger.NewUILogger(confUI))
+
+	// Set the required flags programmatically
+	listOpts.NamespaceFlags.Name = c.namespace
+
+	// Execute list
+	err := listOpts.Run()
 	if err != nil {
-		// Get stderr for better error reporting
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			// If namespace doesn't exist, return empty list
-			if strings.Contains(stderr, "not found") {
-				return []string{}, nil
-			}
-			return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, stderr)
+		// Check if namespace doesn't exist
+		if strings.Contains(err.Error(), "not found") {
+			return []string{}, nil
 		}
 		return nil, fmt.Errorf("kapp list failed: %w", err)
 	}
 
 	// Parse JSON output
 	var listOutput KappListOutput
-	if err := json.Unmarshal(output, &listOutput); err != nil {
+	if err := json.Unmarshal(outputBuf.Bytes(), &listOutput); err != nil {
 		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w", err)
 	}
 
@@ -194,44 +204,43 @@ func (c *Client) List() ([]string, error) {
 	return names, nil
 }
 
-// inspectWithFlags is a helper method that executes kapp inspect with custom flags
-func (c *Client) inspectWithFlags(appName string, flags []string) (string, error) {
-	// Build the full command args
-	baseArgs := []string{
-		"inspect",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--color=false",
-		"--tty=false",
-	}
-	args := append(baseArgs, flags...)
-
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp", args...)
-
-	output, err := cmd.Output()
-	if err != nil {
-		// Get stderr for better error reporting
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, string(exitErr.Stderr))
-		}
-		return "", fmt.Errorf("kapp inspect failed: %w", err)
-	}
-
-	return string(output), nil
-}
-
-// InspectJSON gets the JSON output from kapp inspect with tree hierarchy and parses it
+// InspectJSON gets the JSON output from kapp inspect with tree hierarchy using native kapp Go API
 func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
-	output, err := c.inspectWithFlags(appName, []string{"--json", "--tree"})
+	// Create a buffer to capture JSON output
+	var outputBuf bytes.Buffer
+
+	// Create a temporary UI configuration with the buffer
+	writerUI := ui.NewWriterUI(&outputBuf, io.Discard, ui.NewNoopLogger())
+	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
+	confUI.EnableNonInteractive()
+	confUI.EnableJSON()
+
+	// Create kapp dependencies
+	configFactory := cmdcore.NewConfigFactoryImpl()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+
+	// Configure kubeconfig context
+	configFactory.ConfigureContextResolver(func() (string, error) {
+		return c.kubeconfig, nil
+	})
+
+	// Create inspect options
+	inspectOpts := cmdapp.NewInspectOptions(confUI, depsFactory, logger.NewUILogger(confUI))
+
+	// Set the required flags programmatically
+	inspectOpts.AppFlags.Name = appName
+	inspectOpts.AppFlags.NamespaceFlags.Name = c.namespace
+	inspectOpts.Tree = true
+
+	// Execute inspect
+	err := inspectOpts.Run()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kapp inspect failed: %w", err)
 	}
 
 	// Parse JSON output
 	var kappOutput KappInspectOutput
-	if err := json.Unmarshal([]byte(output), &kappOutput); err != nil {
+	if err := json.Unmarshal(outputBuf.Bytes(), &kappOutput); err != nil {
 		return nil, fmt.Errorf("failed to parse kapp JSON output: %w", err)
 	}
 
