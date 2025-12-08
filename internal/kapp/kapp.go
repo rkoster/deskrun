@@ -45,14 +45,19 @@ type KappInspectOutput struct {
 	Tables []KappTable `json:"Tables"`
 }
 
-// UIConfig holds configuration for UI behavior
+// UIConfig holds configuration for UI behavior.
+//
+// Option interactions:
+//   - If JSON is true, output is formatted as JSON and color is disabled, regardless of the Color setting.
+//   - If Silent is true, interactive prompts are disabled and non-essential output is suppressed.
+//   - Color enables colored output for supported formats, but is ignored if JSON is true.
+//   - Stdout and Stderr specify the output destinations for normal and error output, respectively.
 type UIConfig struct {
 	Stdout io.Writer
 	Stderr io.Writer
-	Silent bool // Disable interactive prompts
-	Color  bool // Enable color output
-	JSON   bool // Output in JSON format
-	Debug  bool // Enable debug logging
+	Silent bool // Disable interactive prompts and suppress non-essential output
+	Color  bool // Enable color output (ignored if JSON is true)
+	JSON   bool // Output in JSON format (disables color)
 }
 
 // NewClient creates a new kapp client with default UI configuration
@@ -63,7 +68,6 @@ func NewClient(kubeconfig, namespace string) *Client {
 		Silent: true,  // Non-interactive by default
 		Color:  false, // No color by default
 		JSON:   false,
-		Debug:  false,
 	})
 }
 
@@ -76,7 +80,8 @@ func NewClientWithUI(kubeconfig, namespace string, uiConfig UIConfig) *Client {
 	}
 }
 
-// Deploy deploys resources using kapp
+// Deploy deploys resources using the native kapp Go API (not by executing the kapp CLI binary).
+// This approach may result in error messages and behavior that differ from the CLI.
 func (c *Client) Deploy(appName string, manifestPath string) error {
 	// Create a custom UI with the configured writers
 	confUI := c.createConfUI()
@@ -99,14 +104,12 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 	deployOpts.AppFlags.NamespaceFlags.Name = c.namespace
 	deployOpts.FileFlags.Files = []string{manifestPath}
 
-	// Enable non-interactive mode
-	confUI.EnableNonInteractive()
-
-	// Execute deploy
+	// Execute deploy (non-interactive mode is handled by createConfUI based on UIConfig.Silent)
 	return deployOpts.Run()
 }
 
-// Delete deletes an app using kapp
+// Delete deletes an app using the native kapp Go API (not by executing the kapp CLI binary).
+// This approach may result in error messages and behavior that differ from the CLI.
 func (c *Client) Delete(appName string) error {
 	// Create a custom UI with the configured writers
 	confUI := c.createConfUI()
@@ -127,10 +130,7 @@ func (c *Client) Delete(appName string) error {
 	deleteOpts.AppFlags.Name = appName
 	deleteOpts.AppFlags.NamespaceFlags.Name = c.namespace
 
-	// Enable non-interactive mode
-	confUI.EnableNonInteractive()
-
-	// Execute delete
+	// Execute delete (non-interactive mode is handled by createConfUI based on UIConfig.Silent)
 	return deleteOpts.Run()
 }
 
@@ -154,11 +154,8 @@ func (c *Client) List() ([]string, error) {
 	// Create a buffer to capture JSON output
 	var outputBuf bytes.Buffer
 
-	// Create a temporary UI configuration with the buffer
-	writerUI := ui.NewWriterUI(&outputBuf, io.Discard, ui.NewNoopLogger())
-	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-	confUI.EnableJSON()
+	// Use a helper to create a JSON-enabled UI configuration
+	confUI := c.createJSONUI(&outputBuf)
 
 	// Create kapp dependencies
 	configFactory := cmdcore.NewConfigFactoryImpl()
@@ -178,8 +175,9 @@ func (c *Client) List() ([]string, error) {
 	// Execute list
 	err := listOpts.Run()
 	if err != nil {
-		// Check if namespace doesn't exist
-		if strings.Contains(err.Error(), "not found") {
+		// Check if error is specifically about a missing namespace.
+		// This is more robust than matching only "not found".
+		if strings.Contains(err.Error(), "namespace") && strings.Contains(err.Error(), "not found") {
 			return []string{}, nil
 		}
 		return nil, fmt.Errorf("kapp list failed: %w", err)
@@ -209,11 +207,8 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	// Create a buffer to capture JSON output
 	var outputBuf bytes.Buffer
 
-	// Create a temporary UI configuration with the buffer
-	writerUI := ui.NewWriterUI(&outputBuf, io.Discard, ui.NewNoopLogger())
-	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
-	confUI.EnableNonInteractive()
-	confUI.EnableJSON()
+	// Use a helper to create a JSON-enabled UI configuration
+	confUI := c.createJSONUI(&outputBuf)
 
 	// Create kapp dependencies
 	configFactory := cmdcore.NewConfigFactoryImpl()
@@ -278,6 +273,23 @@ func (c *Client) createConfUI() *ui.ConfUI {
 	if c.uiConfig.Silent {
 		confUI.EnableNonInteractive()
 	}
+
+	return confUI
+}
+
+// createJSONUI creates a go-cli-ui ConfUI for JSON output with the provided buffer.
+// This is used by List() and InspectJSON() methods which require JSON output for parsing,
+// independent of the client's UIConfig settings.
+func (c *Client) createJSONUI(outputBuf *bytes.Buffer) *ui.ConfUI {
+	// Create a writer UI with the buffer for output and discard errors
+	writerUI := ui.NewWriterUI(outputBuf, io.Discard, ui.NewNoopLogger())
+
+	// Wrap in ConfUI for configuration
+	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
+
+	// Always enable non-interactive and JSON for these operations
+	confUI.EnableNonInteractive()
+	confUI.EnableJSON()
 
 	return confUI
 }
