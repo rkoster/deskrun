@@ -86,15 +86,10 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 	// Create a custom UI with the configured writers
 	confUI := c.createConfUI()
 
-	// Create kapp dependencies
-	configFactory := cmdcore.NewConfigFactoryImpl()
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
 	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
 	preflights := preflight.NewRegistry(map[string]preflight.Check{})
-
-	// Configure kubeconfig context
-	configFactory.ConfigureContextResolver(func() (string, error) {
-		return c.kubeconfig, nil
-	})
 
 	// Create deploy options
 	deployOpts := cmdapp.NewDeployOptions(confUI, depsFactory, logger.NewUILogger(confUI), preflights)
@@ -114,14 +109,9 @@ func (c *Client) Delete(appName string) error {
 	// Create a custom UI with the configured writers
 	confUI := c.createConfUI()
 
-	// Create kapp dependencies
-	configFactory := cmdcore.NewConfigFactoryImpl()
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
 	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
-
-	// Configure kubeconfig context
-	configFactory.ConfigureContextResolver(func() (string, error) {
-		return c.kubeconfig, nil
-	})
 
 	// Create delete options
 	deleteOpts := cmdapp.NewDeleteOptions(confUI, depsFactory, logger.NewUILogger(confUI))
@@ -157,14 +147,9 @@ func (c *Client) List() ([]string, error) {
 	// Use a helper to create a JSON-enabled UI configuration
 	confUI := c.createJSONUI(&outputBuf)
 
-	// Create kapp dependencies
-	configFactory := cmdcore.NewConfigFactoryImpl()
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
 	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
-
-	// Configure kubeconfig context
-	configFactory.ConfigureContextResolver(func() (string, error) {
-		return c.kubeconfig, nil
-	})
 
 	// Create list options
 	listOpts := cmdapp.NewListOptions(confUI, depsFactory, logger.NewUILogger(confUI))
@@ -210,14 +195,9 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	// Use a helper to create a JSON-enabled UI configuration
 	confUI := c.createJSONUI(&outputBuf)
 
-	// Create kapp dependencies
-	configFactory := cmdcore.NewConfigFactoryImpl()
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
 	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
-
-	// Configure kubeconfig context
-	configFactory.ConfigureContextResolver(func() (string, error) {
-		return c.kubeconfig, nil
-	})
 
 	// Create inspect options
 	inspectOpts := cmdapp.NewInspectOptions(confUI, depsFactory, logger.NewUILogger(confUI))
@@ -240,6 +220,26 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	}
 
 	return &kappOutput, nil
+}
+
+// createConfigFactory creates and configures a kapp ConfigFactory with proper kubeconfig settings
+func (c *Client) createConfigFactory() *cmdcore.ConfigFactoryImpl {
+	configFactory := cmdcore.NewConfigFactoryImpl()
+	
+	// Configure kubeconfig path resolver
+	// The kubeconfig field in Client represents the context name, but kapp needs the path
+	// We'll use the default kubeconfig path and set the context
+	configFactory.ConfigurePathResolver(func() (string, error) {
+		// Return empty string to use default kubeconfig location (~/.kube/config)
+		return "", nil
+	})
+	
+	// Configure context resolver to use the specified context
+	configFactory.ConfigureContextResolver(func() (string, error) {
+		return c.kubeconfig, nil
+	})
+	
+	return configFactory
 }
 
 // createConfUI creates a go-cli-ui ConfUI based on the client's UI configuration
