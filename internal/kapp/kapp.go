@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	cmdapp "carvel.dev/kapp/pkg/kapp/cmd/app"
 	cmdcore "carvel.dev/kapp/pkg/kapp/cmd/core"
@@ -99,6 +100,10 @@ func (c *Client) Deploy(appName string, manifestPath string) error {
 	deployOpts.AppFlags.NamespaceFlags.Name = c.namespace
 	deployOpts.FileFlags.Files = []string{manifestPath}
 
+	// Set default apply options (required to prevent throttle panic)
+	// These match the defaults used by kapp CLI in ApplyFlagsDeployDefaults
+	c.setDefaultApplyOptions(deployOpts)
+
 	// Execute deploy (non-interactive mode is handled by createConfUI based on UIConfig.Silent)
 	return deployOpts.Run()
 }
@@ -169,9 +174,15 @@ func (c *Client) List() ([]string, error) {
 	}
 
 	// Parse JSON output
+	outputBytes := outputBuf.Bytes()
+	if len(outputBytes) == 0 {
+		// Empty output means no apps in the namespace
+		return []string{}, nil
+	}
+
 	var listOutput KappListOutput
-	if err := json.Unmarshal(outputBuf.Bytes(), &listOutput); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w", err)
+	if err := json.Unmarshal(outputBytes, &listOutput); err != nil {
+		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w (output: %q)", err, string(outputBytes))
 	}
 
 	// Extract app names from JSON
@@ -214,9 +225,14 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	}
 
 	// Parse JSON output
+	outputBytes := outputBuf.Bytes()
+	if len(outputBytes) == 0 {
+		return nil, fmt.Errorf("kapp inspect returned no output for app %s", appName)
+	}
+
 	var kappOutput KappInspectOutput
-	if err := json.Unmarshal(outputBuf.Bytes(), &kappOutput); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp JSON output: %w", err)
+	if err := json.Unmarshal(outputBytes, &kappOutput); err != nil {
+		return nil, fmt.Errorf("failed to parse kapp JSON output: %w (output: %q)", err, string(outputBytes))
 	}
 
 	return &kappOutput, nil
@@ -298,4 +314,28 @@ func (c *Client) createJSONUI(outputBuf *bytes.Buffer) *ui.ConfUI {
 	confUI.EnableJSON()
 
 	return confUI
+}
+
+// setDefaultApplyOptions sets the default apply options that match kapp CLI defaults.
+// This is required to prevent panics and ensure consistent behavior with the CLI.
+func (c *Client) setDefaultApplyOptions(deployOpts *cmdapp.DeployOptions) {
+	// Set default cluster change options (matches ApplyFlagsDeployDefaults)
+	deployOpts.ApplyFlags.ApplyIgnored = false
+	deployOpts.ApplyFlags.Wait = true
+	deployOpts.ApplyFlags.WaitIgnored = false
+
+	// Set default applying changes options (prevents throttle panic)
+	deployOpts.ApplyFlags.ApplyingChangesOpts.Concurrency = 5
+	deployOpts.ApplyFlags.ApplyingChangesOpts.Timeout = 15 * time.Minute
+	deployOpts.ApplyFlags.ApplyingChangesOpts.CheckInterval = 1 * time.Second
+
+	// Set default waiting changes options
+	deployOpts.ApplyFlags.WaitingChangesOpts.Concurrency = 5
+	deployOpts.ApplyFlags.WaitingChangesOpts.Timeout = 15 * time.Minute
+	deployOpts.ApplyFlags.WaitingChangesOpts.CheckInterval = 3 * time.Second
+	deployOpts.ApplyFlags.WaitingChangesOpts.ResourceTimeout = 0 * time.Second
+
+	// Set default exit behavior
+	deployOpts.ApplyFlags.ExitEarlyOnApplyError = true
+	deployOpts.ApplyFlags.ExitEarlyOnWaitError = true
 }
