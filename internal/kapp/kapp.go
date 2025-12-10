@@ -163,7 +163,7 @@ func (c *Client) List() ([]string, error) {
 	// When listing apps in a specific namespace, we need to set the namespace
 	// and ensure we're not listing all namespaces
 	listOpts.NamespaceFlags.Name = c.namespace
-	
+
 	// Explicitly disable all-namespaces mode to ensure we only list in the specified namespace
 	// This is important because the default behavior might list across all namespaces
 	// Set AllNamespaces to false (empty string means don't use all namespaces flag)
@@ -250,7 +250,7 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 // createConfigFactory creates and configures a kapp ConfigFactory with proper kubeconfig settings
 func (c *Client) createConfigFactory() *cmdcore.ConfigFactoryImpl {
 	configFactory := cmdcore.NewConfigFactoryImpl()
-	
+
 	// Configure kubeconfig path resolver
 	// The kubeconfig field in Client represents the context name, but kapp needs the path
 	// We'll use the default kubeconfig path and set the context
@@ -258,18 +258,18 @@ func (c *Client) createConfigFactory() *cmdcore.ConfigFactoryImpl {
 		// Return empty string to use default kubeconfig location (~/.kube/config)
 		return "", nil
 	})
-	
+
 	// Configure context resolver to use the specified context
 	configFactory.ConfigureContextResolver(func() (string, error) {
 		return c.kubeconfig, nil
 	})
-	
+
 	// Configure YAML resolver (required by kapp, but we don't use explicit YAML config)
 	configFactory.ConfigureYAMLResolver(func() (string, error) {
 		// Return empty string to use kubeconfig file instead of explicit YAML
 		return "", nil
 	})
-	
+
 	return configFactory
 }
 
