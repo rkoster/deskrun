@@ -14,10 +14,11 @@ func init() {
 	klog.InitFlags(nil)
 
 	// Set the log level to 0 to suppress info-level throttling messages
-	flag.Set("v", "0")
-	flag.Set("logtostderr", "false")
-	flag.Set("alsologtostderr", "false")
-	flag.Set("stderrthreshold", "2") // Only log ERROR and FATAL to stderr
+	// These errors should not occur with valid flag names and values
+	_ = flag.Set("v", "0")
+	_ = flag.Set("logtostderr", "false")
+	_ = flag.Set("alsologtostderr", "false")
+	_ = flag.Set("stderrthreshold", "2") // Only log ERROR and FATAL to stderr
 }
 
 func main() {
