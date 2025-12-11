@@ -1,16 +1,26 @@
 package kapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"io"
+	"os"
 	"strings"
+	"time"
+
+	cmdapp "carvel.dev/kapp/pkg/kapp/cmd/app"
+	cmdcore "carvel.dev/kapp/pkg/kapp/cmd/core"
+	"carvel.dev/kapp/pkg/kapp/logger"
+	"carvel.dev/kapp/pkg/kapp/preflight"
+	"github.com/cppforlife/go-cli-ui/ui"
 )
 
 // Client provides an interface for kapp operations
 type Client struct {
 	kubeconfig string
 	namespace  string
+	uiConfig   UIConfig
 }
 
 // KappResource represents a single resource from kapp JSON output
@@ -36,55 +46,87 @@ type KappInspectOutput struct {
 	Tables []KappTable `json:"Tables"`
 }
 
-// NewClient creates a new kapp client
+// UIConfig holds configuration for UI behavior.
+//
+// Option interactions:
+//   - If JSON is true, output is formatted as JSON and color is disabled, regardless of the Color setting.
+//   - If Silent is true, interactive prompts are disabled and non-essential output is suppressed.
+//   - Color enables colored output for supported formats, but is ignored if JSON is true.
+//   - Stdout and Stderr specify the output destinations for normal and error output, respectively.
+type UIConfig struct {
+	Stdout io.Writer
+	Stderr io.Writer
+	Silent bool // Disable interactive prompts and suppress non-essential output
+	Color  bool // Enable color output (ignored if JSON is true)
+	JSON   bool // Output in JSON format (disables color)
+}
+
+// NewClient creates a new kapp client with default UI configuration
 func NewClient(kubeconfig, namespace string) *Client {
+	return NewClientWithUI(kubeconfig, namespace, UIConfig{
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Silent: true,  // Non-interactive by default
+		Color:  false, // No color by default
+		JSON:   false,
+	})
+}
+
+// NewClientWithUI creates a new kapp client with custom UI configuration
+func NewClientWithUI(kubeconfig, namespace string, uiConfig UIConfig) *Client {
 	return &Client{
 		kubeconfig: kubeconfig,
 		namespace:  namespace,
+		uiConfig:   uiConfig,
 	}
 }
 
-// Deploy deploys resources using kapp
+// Deploy deploys resources using the native kapp Go API (not by executing the kapp CLI binary).
+// This approach may result in error messages and behavior that differ from the CLI.
 func (c *Client) Deploy(appName string, manifestPath string) error {
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp",
-		"deploy",
-		"-a", appName,
-		"-f", manifestPath,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"-y", // auto-confirm
-		"--color=false",
-		"--tty=false",
-	)
+	// Create a custom UI with the configured writers
+	confUI := c.createConfUI()
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("kapp deploy failed: %w\noutput: %s", err, string(output))
-	}
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+	preflights := preflight.NewRegistry(map[string]preflight.Check{})
 
-	return nil
+	// Create deploy options
+	deployOpts := cmdapp.NewDeployOptions(confUI, depsFactory, logger.NewUILogger(confUI), preflights)
+
+	// Set the required flags programmatically
+	deployOpts.AppFlags.Name = appName
+	deployOpts.AppFlags.NamespaceFlags.Name = c.namespace
+	deployOpts.FileFlags.Files = []string{manifestPath}
+
+	// Set default apply options (required to prevent throttle panic)
+	// These match the defaults used by kapp CLI in ApplyFlagsDeployDefaults
+	c.setDefaultApplyOptions(deployOpts)
+
+	// Execute deploy (non-interactive mode is handled by createConfUI based on UIConfig.Silent)
+	return deployOpts.Run()
 }
 
-// Delete deletes an app using kapp
+// Delete deletes an app using the native kapp Go API (not by executing the kapp CLI binary).
+// This approach may result in error messages and behavior that differ from the CLI.
 func (c *Client) Delete(appName string) error {
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp",
-		"delete",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"-y", // auto-confirm
-		"--color=false",
-		"--tty=false",
-	)
+	// Create a custom UI with the configured writers
+	confUI := c.createConfUI()
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("kapp delete failed: %w\noutput: %s", err, string(output))
-	}
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
 
-	return nil
+	// Create delete options
+	deleteOpts := cmdapp.NewDeleteOptions(confUI, depsFactory, logger.NewUILogger(confUI))
+
+	// Set the required flags programmatically
+	deleteOpts.AppFlags.Name = appName
+	deleteOpts.AppFlags.NamespaceFlags.Name = c.namespace
+
+	// Execute delete (non-interactive mode is handled by createConfUI based on UIConfig.Silent)
+	return deleteOpts.Run()
 }
 
 // KappListApp represents a single app from kapp list JSON output
@@ -102,36 +144,49 @@ type KappListOutput struct {
 	Tables []KappListTable `json:"Tables"`
 }
 
-// List lists all kapp apps using JSON output for reliable parsing
+// List lists all kapp apps using the native kapp Go API
+// Note: JSON output requires explicit Flush() call to write accumulated data
 func (c *Client) List() ([]string, error) {
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp",
-		"list",
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--json",
-		"--color=false",
-		"--tty=false",
-	)
+	// Create a buffer to capture JSON output
+	var outputBuf bytes.Buffer
 
-	output, err := cmd.Output()
+	// Use a helper to create a JSON-enabled UI configuration
+	confUI := c.createJSONUI(&outputBuf)
+
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+
+	// Create list options
+	listOpts := cmdapp.NewListOptions(confUI, depsFactory, logger.NewUILogger(confUI))
+
+	// Set the required flags programmatically
+	listOpts.NamespaceFlags.Name = c.namespace
+
+	// Execute list
+	err := listOpts.Run()
 	if err != nil {
-		// Get stderr for better error reporting
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			// If namespace doesn't exist, return empty list
-			if strings.Contains(stderr, "not found") {
-				return []string{}, nil
-			}
-			return nil, fmt.Errorf("kapp list failed: %w\nstderr: %s", err, stderr)
+		// Check if error is specifically about a missing namespace.
+		if strings.Contains(err.Error(), "namespace") && strings.Contains(err.Error(), "not found") {
+			return []string{}, nil
 		}
 		return nil, fmt.Errorf("kapp list failed: %w", err)
 	}
 
+	// CRITICAL: Flush the UI to get the accumulated JSON output
+	confUI.Flush()
+
 	// Parse JSON output
+	outputBytes := outputBuf.Bytes()
+	if len(outputBytes) == 0 {
+		// Empty output - this likely means no apps are deployed in the namespace
+		return []string{}, nil
+	}
+
 	var listOutput KappListOutput
-	if err := json.Unmarshal(output, &listOutput); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w", err)
+	if err := json.Unmarshal(outputBytes, &listOutput); err != nil {
+		// Provide detailed error with actual output for debugging
+		return nil, fmt.Errorf("failed to parse kapp list JSON output: %w (output length: %d, output: %q)", err, len(outputBytes), string(outputBytes))
 	}
 
 	// Extract app names from JSON
@@ -147,46 +202,152 @@ func (c *Client) List() ([]string, error) {
 	return names, nil
 }
 
-// inspectWithFlags is a helper method that executes kapp inspect with custom flags
-func (c *Client) inspectWithFlags(appName string, flags []string) (string, error) {
-	// Build the full command args
-	baseArgs := []string{
-		"inspect",
-		"-a", appName,
-		"--kubeconfig-context", c.kubeconfig,
-		"-n", c.namespace,
-		"--color=false",
-		"--tty=false",
-	}
-	args := append(baseArgs, flags...)
-
-	// Use os/exec to run kapp directly
-	cmd := exec.Command("kapp", args...)
-
-	output, err := cmd.Output()
-	if err != nil {
-		// Get stderr for better error reporting
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("kapp inspect failed: %w\nstderr: %s", err, string(exitErr.Stderr))
-		}
-		return "", fmt.Errorf("kapp inspect failed: %w", err)
-	}
-
-	return string(output), nil
-}
-
-// InspectJSON gets the JSON output from kapp inspect with tree hierarchy and parses it
+// InspectJSON gets the output from kapp inspect with tree hierarchy using native kapp Go API
 func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
-	output, err := c.inspectWithFlags(appName, []string{"--json", "--tree"})
+	// Create a buffer to capture JSON output
+	var outputBuf bytes.Buffer
+
+	// Use a helper to create a JSON-enabled UI configuration
+	confUI := c.createJSONUI(&outputBuf)
+
+	// Create kapp dependencies with proper kubeconfig configuration
+	configFactory := c.createConfigFactory()
+	depsFactory := cmdcore.NewDepsFactoryImpl(configFactory, confUI)
+
+	// Create inspect options
+	inspectOpts := cmdapp.NewInspectOptions(confUI, depsFactory, logger.NewUILogger(confUI))
+
+	// Set the required flags programmatically
+	inspectOpts.AppFlags.Name = appName
+	inspectOpts.AppFlags.NamespaceFlags.Name = c.namespace
+	inspectOpts.Tree = true
+
+	// Execute inspect
+	err := inspectOpts.Run()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kapp inspect failed: %w", err)
 	}
+
+	// CRITICAL: Flush the UI to get the accumulated JSON output
+	confUI.Flush()
 
 	// Parse JSON output
+	outputBytes := outputBuf.Bytes()
+	if len(outputBytes) == 0 {
+		return nil, fmt.Errorf("kapp inspect returned no output for app %s", appName)
+	}
+
 	var kappOutput KappInspectOutput
-	if err := json.Unmarshal([]byte(output), &kappOutput); err != nil {
-		return nil, fmt.Errorf("failed to parse kapp JSON output: %w", err)
+	if err := json.Unmarshal(outputBytes, &kappOutput); err != nil {
+		return nil, fmt.Errorf("failed to parse kapp JSON output: %w (output: %q)", err, string(outputBytes))
 	}
 
 	return &kappOutput, nil
+}
+
+// createConfigFactory creates and configures a kapp ConfigFactory with proper kubeconfig settings
+func (c *Client) createConfigFactory() *cmdcore.ConfigFactoryImpl {
+	configFactory := cmdcore.NewConfigFactoryImpl()
+
+	// Configure kubeconfig path resolver
+	// The kubeconfig field in Client represents the context name, but kapp needs the path
+	// We'll use the default kubeconfig path and set the context
+	configFactory.ConfigurePathResolver(func() (string, error) {
+		// Return empty string to use default kubeconfig location (~/.kube/config)
+		return "", nil
+	})
+
+	// Configure context resolver to use the specified context
+	configFactory.ConfigureContextResolver(func() (string, error) {
+		return c.kubeconfig, nil
+	})
+
+	// Configure YAML resolver (required by kapp, but we don't use explicit YAML config)
+	configFactory.ConfigureYAMLResolver(func() (string, error) {
+		// Return empty string to use kubeconfig file instead of explicit YAML
+		return "", nil
+	})
+
+	// Configure client rate limits to match kapp CLI performance
+	// Default client-go values: QPS=5, Burst=10 (causes ~1.2s delays)
+	// Set higher values to eliminate throttling and match CLI speed
+	configFactory.ConfigureClient(100.0, 200) // QPS=100, Burst=200
+
+	return configFactory
+}
+
+// createConfUI creates a go-cli-ui ConfUI based on the client's UI configuration
+func (c *Client) createConfUI() *ui.ConfUI {
+	// Determine output and error writers
+	outWriter := c.uiConfig.Stdout
+	if outWriter == nil {
+		outWriter = os.Stdout
+	}
+
+	errWriter := c.uiConfig.Stderr
+	if errWriter == nil {
+		errWriter = os.Stderr
+	}
+
+	// Create a writer UI with custom writers
+	writerUI := ui.NewWriterUI(outWriter, errWriter, ui.NewNoopLogger())
+
+	// Wrap in ConfUI for configuration
+	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
+
+	// Apply UI configuration
+	if c.uiConfig.Color {
+		confUI.EnableColor()
+	}
+
+	if c.uiConfig.JSON {
+		confUI.EnableJSON()
+	}
+
+	if c.uiConfig.Silent {
+		confUI.EnableNonInteractive()
+	}
+
+	return confUI
+}
+
+// createJSONUI creates a go-cli-ui ConfUI for JSON output with the provided buffer.
+// This is used by List() and InspectJSON() methods which require JSON output for parsing,
+// independent of the client's UIConfig settings.
+func (c *Client) createJSONUI(outputBuf *bytes.Buffer) *ui.ConfUI {
+	// Create a writer UI with the buffer for output and stderr for error messages
+	writerUI := ui.NewWriterUI(outputBuf, os.Stderr, ui.NewNoopLogger())
+
+	// Wrap in ConfUI for configuration - try with TTY disabled
+	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
+
+	// Enable JSON mode and non-interactive mode
+	confUI.EnableNonInteractive()
+	confUI.EnableJSON()
+
+	return confUI
+}
+
+// setDefaultApplyOptions sets the default apply options that match kapp CLI defaults.
+// This is required to prevent panics and ensure consistent behavior with the CLI.
+func (c *Client) setDefaultApplyOptions(deployOpts *cmdapp.DeployOptions) {
+	// Set default cluster change options (matches ApplyFlagsDeployDefaults)
+	deployOpts.ApplyFlags.ApplyIgnored = false
+	deployOpts.ApplyFlags.Wait = true
+	deployOpts.ApplyFlags.WaitIgnored = false
+
+	// Set default applying changes options (prevents throttle panic)
+	deployOpts.ApplyFlags.ApplyingChangesOpts.Concurrency = 5
+	deployOpts.ApplyFlags.ApplyingChangesOpts.Timeout = 15 * time.Minute
+	deployOpts.ApplyFlags.ApplyingChangesOpts.CheckInterval = 1 * time.Second
+
+	// Set default waiting changes options
+	deployOpts.ApplyFlags.WaitingChangesOpts.Concurrency = 5
+	deployOpts.ApplyFlags.WaitingChangesOpts.Timeout = 15 * time.Minute
+	deployOpts.ApplyFlags.WaitingChangesOpts.CheckInterval = 3 * time.Second
+	deployOpts.ApplyFlags.ResourceTimeout = 0 * time.Second
+
+	// Set default exit behavior
+	deployOpts.ApplyFlags.ExitEarlyOnApplyError = true
+	deployOpts.ApplyFlags.ExitEarlyOnWaitError = true
 }
