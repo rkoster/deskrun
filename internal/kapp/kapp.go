@@ -125,6 +125,9 @@ func (c *Client) Delete(appName string) error {
 	deleteOpts.AppFlags.Name = appName
 	deleteOpts.AppFlags.NamespaceFlags.Name = c.namespace
 
+	// Set default apply options (required to prevent throttle panic)
+	c.setDefaultDeleteOptions(deleteOpts)
+
 	// Execute delete (non-interactive mode is handled by createConfUI based on UIConfig.Silent)
 	return deleteOpts.Run()
 }
@@ -350,4 +353,28 @@ func (c *Client) setDefaultApplyOptions(deployOpts *cmdapp.DeployOptions) {
 	// Set default exit behavior
 	deployOpts.ApplyFlags.ExitEarlyOnApplyError = true
 	deployOpts.ApplyFlags.ExitEarlyOnWaitError = true
+}
+
+// setDefaultDeleteOptions sets the default delete options that match kapp CLI defaults.
+// This is required to prevent panics and ensure consistent behavior with the CLI.
+func (c *Client) setDefaultDeleteOptions(deleteOpts *cmdapp.DeleteOptions) {
+	// Set default cluster change options (matches kapp delete CLI defaults)
+	deleteOpts.ApplyFlags.ApplyIgnored = false
+	deleteOpts.ApplyFlags.Wait = true
+	deleteOpts.ApplyFlags.WaitIgnored = false
+
+	// Set default applying changes options (prevents throttle panic)
+	deleteOpts.ApplyFlags.ApplyingChangesOpts.Concurrency = 5
+	deleteOpts.ApplyFlags.ApplyingChangesOpts.Timeout = 15 * time.Minute
+	deleteOpts.ApplyFlags.ApplyingChangesOpts.CheckInterval = 1 * time.Second
+
+	// Set default waiting changes options
+	deleteOpts.ApplyFlags.WaitingChangesOpts.Concurrency = 5
+	deleteOpts.ApplyFlags.WaitingChangesOpts.Timeout = 15 * time.Minute
+	deleteOpts.ApplyFlags.WaitingChangesOpts.CheckInterval = 3 * time.Second
+	deleteOpts.ApplyFlags.ResourceTimeout = 0 * time.Second
+
+	// Set default exit behavior
+	deleteOpts.ApplyFlags.ExitEarlyOnApplyError = true
+	deleteOpts.ApplyFlags.ExitEarlyOnWaitError = true
 }
