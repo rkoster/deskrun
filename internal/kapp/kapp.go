@@ -145,6 +145,7 @@ type KappListOutput struct {
 }
 
 // List lists all kapp apps using the native kapp Go API
+// Note: JSON output requires explicit Flush() call to write accumulated data
 func (c *Client) List() ([]string, error) {
 	// Create a buffer to capture JSON output
 	var outputBuf bytes.Buffer
@@ -160,31 +161,25 @@ func (c *Client) List() ([]string, error) {
 	listOpts := cmdapp.NewListOptions(confUI, depsFactory, logger.NewUILogger(confUI))
 
 	// Set the required flags programmatically
-	// When listing apps in a specific namespace, we need to set the namespace
-	// and ensure we're not listing all namespaces
 	listOpts.NamespaceFlags.Name = c.namespace
-
-	// Explicitly disable all-namespaces mode to ensure we only list in the specified namespace
-	// This is important because the default behavior might list across all namespaces
-	// Set AllNamespaces to false (empty string means don't use all namespaces flag)
-	// The NamespaceFlags.Name should be sufficient, but we want to be explicit
 
 	// Execute list
 	err := listOpts.Run()
 	if err != nil {
 		// Check if error is specifically about a missing namespace.
-		// This is more robust than matching only "not found".
 		if strings.Contains(err.Error(), "namespace") && strings.Contains(err.Error(), "not found") {
 			return []string{}, nil
 		}
 		return nil, fmt.Errorf("kapp list failed: %w", err)
 	}
 
+	// CRITICAL: Flush the UI to get the accumulated JSON output
+	confUI.Flush()
+
 	// Parse JSON output
 	outputBytes := outputBuf.Bytes()
 	if len(outputBytes) == 0 {
 		// Empty output - this likely means no apps are deployed in the namespace
-		// This is a normal case, not an error
 		return []string{}, nil
 	}
 
@@ -207,7 +202,7 @@ func (c *Client) List() ([]string, error) {
 	return names, nil
 }
 
-// InspectJSON gets the JSON output from kapp inspect with tree hierarchy using native kapp Go API
+// InspectJSON gets the output from kapp inspect with tree hierarchy using native kapp Go API
 func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	// Create a buffer to capture JSON output
 	var outputBuf bytes.Buffer
@@ -232,6 +227,9 @@ func (c *Client) InspectJSON(appName string) (*KappInspectOutput, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kapp inspect failed: %w", err)
 	}
+
+	// CRITICAL: Flush the UI to get the accumulated JSON output
+	confUI.Flush()
 
 	// Parse JSON output
 	outputBytes := outputBuf.Bytes()
@@ -269,6 +267,11 @@ func (c *Client) createConfigFactory() *cmdcore.ConfigFactoryImpl {
 		// Return empty string to use kubeconfig file instead of explicit YAML
 		return "", nil
 	})
+
+	// Configure client rate limits to match kapp CLI performance
+	// Default client-go values: QPS=5, Burst=10 (causes ~1.2s delays)
+	// Set higher values to eliminate throttling and match CLI speed
+	configFactory.ConfigureClient(100.0, 200) // QPS=100, Burst=200
 
 	return configFactory
 }
@@ -312,13 +315,13 @@ func (c *Client) createConfUI() *ui.ConfUI {
 // This is used by List() and InspectJSON() methods which require JSON output for parsing,
 // independent of the client's UIConfig settings.
 func (c *Client) createJSONUI(outputBuf *bytes.Buffer) *ui.ConfUI {
-	// Create a writer UI with the buffer for output and discard errors
-	writerUI := ui.NewWriterUI(outputBuf, io.Discard, ui.NewNoopLogger())
+	// Create a writer UI with the buffer for output and stderr for error messages
+	writerUI := ui.NewWriterUI(outputBuf, os.Stderr, ui.NewNoopLogger())
 
-	// Wrap in ConfUI for configuration
+	// Wrap in ConfUI for configuration - try with TTY disabled
 	confUI := ui.NewWrappingConfUI(writerUI, ui.NewNoopLogger())
 
-	// Always enable non-interactive and JSON for these operations
+	// Enable JSON mode and non-interactive mode
 	confUI.EnableNonInteractive()
 	confUI.EnableJSON()
 
