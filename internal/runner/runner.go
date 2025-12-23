@@ -508,6 +508,20 @@ data:
 		}
 	}
 
+	// Add GitHub Actions workspace directory volume mounts
+	// These directories are required by the GitHub Actions runner and workflow scripts
+	hookExtension += `
+        - name: gh-ws-temp
+          mountPath: /__w/_temp
+        - name: gh-ws-actions
+          mountPath: /__w/_actions
+        - name: gh-ws-tool
+          mountPath: /__w/_tool
+        - name: github-home
+          mountPath: /github/home
+        - name: github-flow
+          mountPath: /github/workflow`
+
 	// Add volume definitions (system mounts + cache volumes needed by job container)
 	// Cache volumes are only needed for job containers, not the runner container
 	hookExtension += `
@@ -553,6 +567,20 @@ data:
 				i, hostPath)
 		}
 	}
+
+	// Add GitHub Actions workspace directory volumes
+	// These use emptyDir to provide temporary directories for each job pod
+	hookExtension += `
+      - name: gh-ws-temp
+        emptyDir: {}
+      - name: gh-ws-actions
+        emptyDir: {}
+      - name: gh-ws-tool
+        emptyDir: {}
+      - name: github-home
+        emptyDir: {}
+      - name: github-flow
+        emptyDir: {}`
 
 	return hookExtension
 }

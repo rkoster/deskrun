@@ -231,13 +231,25 @@ func TestGenerateHookExtensionConfigMap(t *testing.T) {
 				"path: /dev/pts",
 				"path: /dev/shm",
 				"type: Directory",
+				// GitHub Actions workspace directories
+				"mountPath: /__w/_temp",
+				"mountPath: /__w/_actions",
+				"mountPath: /__w/_tool",
+				"mountPath: /github/home",
+				"mountPath: /github/workflow",
+				"name: gh-ws-temp",
+				"name: gh-ws-actions",
+				"name: gh-ws-tool",
+				"name: github-home",
+				"name: github-flow",
+				"emptyDir: {}",
 			},
 			wantNotContains: []string{
 				// Hook extension should NOT contain runner-specific config
 				"ACTIONS_RUNNER_CONTAINER_HOOKS",
 				"runAsNonRoot: true",
-				// Should not duplicate volumes already in template
-				"work",
+				// Should not duplicate volumes already in template (check for exact volume name)
+				"name: work",
 			},
 		},
 	}
