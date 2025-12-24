@@ -17,11 +17,9 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -108,59 +106,6 @@ func (m *Manager) getDynamicClient() (dynamic.Interface, error) {
 	}
 
 	return dynamicClient, nil
-}
-
-// applyConfigMapFromYAML applies a ConfigMap from YAML string
-func (m *Manager) applyConfigMapFromYAML(ctx context.Context, yamlContent string) error {
-	clientset, err := m.getKubernetesClient()
-	if err != nil {
-		return err
-	}
-
-	// Use Kubernetes deserializer to properly parse the YAML
-	decode := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer().Decode
-	obj, _, err := decode([]byte(yamlContent), nil, nil)
-	if err != nil {
-		return fmt.Errorf("failed to decode ConfigMap YAML: %w", err)
-	}
-
-	// Type assert to ConfigMap
-	configMap, ok := obj.(*corev1.ConfigMap)
-	if !ok {
-		return fmt.Errorf("decoded object is not a ConfigMap, got %T", obj)
-	}
-
-	// Ensure namespace is set (fallback to default if not parsed correctly)
-	if configMap.Namespace == "" {
-		configMap.Namespace = defaultNamespace
-	}
-
-	// Ensure name is set
-	if configMap.Name == "" {
-		return fmt.Errorf("ConfigMap name is empty after parsing YAML")
-	}
-
-	// Try to create or update the ConfigMap
-	_, err = clientset.CoreV1().ConfigMaps(configMap.Namespace).Get(ctx, configMap.Name, metav1.GetOptions{})
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			// Create the ConfigMap
-			_, err = clientset.CoreV1().ConfigMaps(configMap.Namespace).Create(ctx, configMap, metav1.CreateOptions{})
-			if err != nil {
-				return fmt.Errorf("failed to create ConfigMap: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get ConfigMap: %w", err)
-		}
-	} else {
-		// Update the ConfigMap
-		_, err = clientset.CoreV1().ConfigMaps(configMap.Namespace).Update(ctx, configMap, metav1.UpdateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to update ConfigMap: %w", err)
-		}
-	}
-
-	return nil
 }
 
 // crdExists checks if a CRD exists
@@ -255,17 +200,6 @@ func (m *Manager) installInstance(ctx context.Context, installation *deskruntype
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	fmt.Printf("  Installing runner scale set '%s'...\n", instanceName)
-
-	// For privileged container mode, generate and apply the hook extension ConfigMap
-	if installation.ContainerMode == deskruntypes.ContainerModePrivileged {
-		fmt.Printf("  Applying hook extension ConfigMap for privileged mode...\n")
-		hookExtension := m.generateHookExtensionConfigMap(installation, instanceName, instanceNum)
-
-		// Apply the ConfigMap using Kubernetes client
-		if err := m.applyConfigMapFromYAML(ctx, hookExtension); err != nil {
-			return fmt.Errorf("failed to apply hook extension ConfigMap: %w", err)
-		}
-	}
 
 	// Use the unified template processing package (ytt Go library, no shell execution)
 	processor := templates.NewProcessor()
@@ -437,124 +371,6 @@ func (m *Manager) generateYTTDataValues(installation *deskruntypes.RunnerInstall
 	}
 
 	return string(yamlData), nil
-}
-
-// generateHookExtensionConfigMap generates the hook extension ConfigMap YAML for privileged container mode
-// This ConfigMap contains the PodSpec patch that ARC applies to job containers
-// IMPORTANT: The hook extension should ONLY patch the job container with security context and privileged mounts.
-// It should NOT redefine volumes that are already in the runner template (like "work").
-// The hook extension is a JSON patch that gets merged with the existing pod spec.
-func (m *Manager) generateHookExtensionConfigMap(installation *deskruntypes.RunnerInstallation, instanceName string, instanceNum int) string {
-	// Build the PodSpec patch that will be applied to job pods
-	// This patch adds privileged context and capabilities only to job containers
-	// The "$job" placeholder targets the job container created by the runner
-	// NOTE: We do NOT include "work" volume or "cgroup2" (which may not exist) in the patch
-	configMapName := fmt.Sprintf("privileged-hook-extension-%s", instanceName)
-	hookExtension := fmt.Sprintf(`apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: %s
-  namespace: %s`, configMapName, defaultNamespace) + `
-data:
-  content: |
-    spec:
-      hostPID: true
-      hostIPC: true
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-        fsGroup: 0
-      containers:
-      - name: "$job"
-        securityContext:
-          privileged: true
-          runAsUser: 0
-          runAsGroup: 0
-          allowPrivilegeEscalation: true
-          capabilities:
-            add:
-            - SYS_ADMIN
-            - NET_ADMIN
-            - SYS_PTRACE
-            - SYS_CHROOT
-            - SETFCAP
-            - SETPCAP
-            - NET_RAW
-            - IPC_LOCK
-            - SYS_RESOURCE
-            - MKNOD
-            - AUDIT_WRITE
-            - AUDIT_CONTROL
-        volumeMounts:
-        - name: sys
-          mountPath: /sys
-        - name: cgroup
-          mountPath: /sys/fs/cgroup
-          mountPropagation: Bidirectional
-        - name: proc
-          mountPath: /proc
-        - name: dev
-          mountPath: /dev
-        - name: dev-pts
-          mountPath: /dev/pts
-        - name: shm
-          mountPath: /dev/shm`
-
-	// Add cache path volume mounts to job container
-	if len(installation.CachePaths) > 0 {
-		for i := range installation.CachePaths {
-			hookExtension += fmt.Sprintf("\n        - name: cache-%d\n          mountPath: %s",
-				i, installation.CachePaths[i].Target)
-		}
-	}
-
-	// Add volume definitions (system mounts + cache volumes needed by job container)
-	// Cache volumes are only needed for job containers, not the runner container
-	hookExtension += `
-      volumes:
-      - name: sys
-        hostPath:
-          path: /sys
-          type: Directory
-      - name: cgroup
-        hostPath:
-          path: /sys/fs/cgroup
-          type: Directory
-      - name: proc
-        hostPath:
-          path: /proc
-          type: Directory
-      - name: dev
-        hostPath:
-          path: /dev
-          type: Directory
-      - name: dev-pts
-        hostPath:
-          path: /dev/pts
-          type: Directory
-      - name: shm
-        hostPath:
-          path: /dev/shm
-          type: Directory`
-
-	// Add cache path volumes to hook extension
-	if len(installation.CachePaths) > 0 {
-		for i, path := range installation.CachePaths {
-			hostPath := path.Source
-			if hostPath == "" {
-				// Generate instance-specific cache path for multi-instance setups
-				if instanceNum > 0 {
-					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s-%d/cache-%d", installation.Name, instanceNum, i)
-				} else {
-					hostPath = fmt.Sprintf("/tmp/github-runner-cache/%s/cache-%d", installation.Name, i)
-				}
-			}
-			hookExtension += fmt.Sprintf("\n      - name: cache-%d\n        hostPath:\n          path: %s\n          type: DirectoryOrCreate",
-				i, hostPath)
-		}
-	}
-
-	return hookExtension
 }
 
 func (m *Manager) ensureARCController(ctx context.Context) error {

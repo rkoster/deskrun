@@ -46,10 +46,21 @@ func TestPrivilegedContainerTemplateGeneration(t *testing.T) {
 		assert.NotContains(t, dataValues, "/var/run/docker.sock")
 	})
 
-	// Generate hook extension ConfigMap for privileged containers
-	hookExtension := manager.generateHookExtensionConfigMap(installation, installation.Name, 0)
-
+	// Test hook extension ConfigMap via template processing
 	t.Run("hook_extension_enables_docker_daemon", func(t *testing.T) {
+		// Process the full template which includes ConfigMap generation
+		processor := templates.NewProcessor()
+		config := templates.Config{
+			Installation: installation,
+			InstanceName: installation.Name,
+			InstanceNum:  0,
+			Namespace:    "arc-systems",
+		}
+
+		processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+		require.NoError(t, err)
+		hookExtension := string(processedYAML)
+
 		// Security context required for Docker daemon installation
 		assert.Contains(t, hookExtension, "privileged: true")
 		assert.Contains(t, hookExtension, "runAsUser: 0")  // Root user
@@ -123,10 +134,12 @@ func TestDockerCachePersistenceTemplates(t *testing.T) {
 				// Should use hostPath volume
 				"path: /nvme/docker-images",
 				"type: DirectoryOrCreate",
+				// Verify cache-0 specifically uses hostPath (not emptyDir)
+				"name: cache-0\n        hostPath:",
 			},
 			wantNotContains: []string{
-				// Should NOT be emptyDir
-				"emptyDir: {}",
+				// cache-0 specifically should NOT be emptyDir (GitHub workspace volumes will be emptyDir, which is correct)
+				"name: cache-0\n        emptyDir:",
 			},
 		},
 		{
@@ -187,8 +200,6 @@ func TestDockerCachePersistenceTemplates(t *testing.T) {
 // TestMultiInstanceDockerCapabilities validates that all instances in multi-instance
 // deployments have consistent Docker daemon capabilities
 func TestMultiInstanceDockerCapabilities(t *testing.T) {
-	manager := &Manager{}
-
 	installation := &types.RunnerInstallation{
 		Name:          "rubionic-workspace",
 		Repository:    "https://github.com/rkoster/rubionic-workspace",
@@ -206,7 +217,18 @@ func TestMultiInstanceDockerCapabilities(t *testing.T) {
 		instanceName := installation.Name + "-" + string(rune('0'+i))
 
 		t.Run("instance_"+instanceName, func(t *testing.T) {
-			hookExtension := manager.generateHookExtensionConfigMap(installation, instanceName, i)
+			// Process the full template for this instance
+			processor := templates.NewProcessor()
+			config := templates.Config{
+				Installation: installation,
+				InstanceName: instanceName,
+				InstanceNum:  i,
+				Namespace:    "arc-systems",
+			}
+
+			processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
+			require.NoError(t, err)
+			hookExtension := string(processedYAML)
 
 			// Each instance must support Docker daemon installation
 			dockerRequirements := []string{

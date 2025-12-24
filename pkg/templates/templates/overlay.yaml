@@ -1,12 +1,102 @@
 #@ load("@ytt:data", "data")
 #@ load("@ytt:overlay", "overlay")
 #@ load("@ytt:base64", "base64")
+#@ load("@ytt:yaml", "yaml")
 
 #! Deskrun-specific overlay for customizing the base templates
 #! This overlay applies customizations for:
 #! - Instance naming (names, labels)
 #! - GitHub repository and auth configuration
 #! - Privileged mode specific: cache volumes and hook extensions
+
+#! Function to build hook extension ConfigMap content for privileged mode
+#@ def build_hook_extension_spec():
+#@   spec = {}
+#@   spec["hostPID"] = True
+#@   spec["hostIPC"] = True
+#@   spec["securityContext"] = {"runAsUser": 0, "runAsGroup": 0, "fsGroup": 0}
+#@   
+#@   # Build container spec
+#@   container = {}
+#@   container["name"] = "$job"
+#@   container["securityContext"] = {
+#@     "privileged": True,
+#@     "runAsUser": 0,
+#@     "runAsGroup": 0,
+#@     "allowPrivilegeEscalation": True,
+#@     "capabilities": {
+#@       "add": [
+#@         "SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE", "SYS_CHROOT",
+#@         "SETFCAP", "SETPCAP", "NET_RAW", "IPC_LOCK",
+#@         "SYS_RESOURCE", "MKNOD", "AUDIT_WRITE", "AUDIT_CONTROL"
+#@       ]
+#@     }
+#@   }
+#@   
+#@   # Build volumeMounts
+#@   volumeMounts = [
+#@     {"name": "sys", "mountPath": "/sys"},
+#@     {"name": "cgroup", "mountPath": "/sys/fs/cgroup", "mountPropagation": "Bidirectional"},
+#@     {"name": "proc", "mountPath": "/proc"},
+#@     {"name": "dev", "mountPath": "/dev"},
+#@     {"name": "dev-pts", "mountPath": "/dev/pts"},
+#@     {"name": "shm", "mountPath": "/dev/shm"}
+#@   ]
+#@   
+#@   # Add cache path volume mounts
+#@   for i, cachePath in enumerate(data.values.installation.cachePaths):
+#@     volumeMounts.append({"name": "cache-" + str(i), "mountPath": cachePath.target})
+#@   end
+#@   
+#@   # Add GitHub workspace volume mounts
+#@   volumeMounts.extend([
+#@     {"name": "gh-ws-temp", "mountPath": "/__w/_temp"},
+#@     {"name": "gh-ws-actions", "mountPath": "/__w/_actions"},
+#@     {"name": "gh-ws-tool", "mountPath": "/__w/_tool"},
+#@     {"name": "github-home", "mountPath": "/github/home"},
+#@     {"name": "github-flow", "mountPath": "/github/workflow"}
+#@   ])
+#@   
+#@   container["volumeMounts"] = volumeMounts
+#@   
+#@   # Build volumes
+#@   volumes = [
+#@     {"name": "sys", "hostPath": {"path": "/sys", "type": "Directory"}},
+#@     {"name": "cgroup", "hostPath": {"path": "/sys/fs/cgroup", "type": "Directory"}},
+#@     {"name": "proc", "hostPath": {"path": "/proc", "type": "Directory"}},
+#@     {"name": "dev", "hostPath": {"path": "/dev", "type": "Directory"}},
+#@     {"name": "dev-pts", "hostPath": {"path": "/dev/pts", "type": "Directory"}},
+#@     {"name": "shm", "hostPath": {"path": "/dev/shm", "type": "Directory"}}
+#@   ]
+#@   
+#@   # Add cache path volumes
+#@   for i, cachePath in enumerate(data.values.installation.cachePaths):
+#@     cache_source = cachePath.source
+#@     if cache_source == "":
+#@       instance_num = data.values.installation.instanceNum if hasattr(data.values.installation, "instanceNum") else 0
+#@       if instance_num > 0:
+#@         cache_source = "/tmp/github-runner-cache/" + data.values.installation.name + "-" + str(instance_num) + "/cache-" + str(i)
+#@       else:
+#@         cache_source = "/tmp/github-runner-cache/" + data.values.installation.name + "/cache-" + str(i)
+#@       end
+#@     end
+#@     volumes.append({"name": "cache-" + str(i), "hostPath": {"path": cache_source, "type": "DirectoryOrCreate"}})
+#@   end
+#@   
+#@   # Add GitHub workspace volumes
+#@   volumes.extend([
+#@     {"name": "gh-ws-temp", "emptyDir": {}},
+#@     {"name": "gh-ws-actions", "emptyDir": {}},
+#@     {"name": "gh-ws-tool", "emptyDir": {}},
+#@     {"name": "github-home", "emptyDir": {}},
+#@     {"name": "github-flow", "emptyDir": {}}
+#@   ])
+#@   
+#@   spec["containers"] = [container]
+#@   spec["volumes"] = volumes
+#@   
+#@   return {"spec": spec}
+#@ end
 
 #! Apply name transformations to Secret
 #@overlay/match by=overlay.subset({"kind":"Secret"}),expects="0+"
@@ -278,4 +368,16 @@ spec:
           type: DirectoryOrCreate
         #@ end
       #@ end
+#@ end
+
+#! ConfigMap overlay for privileged mode
+#@ if data.values.installation.containerMode == "cached-privileged-kubernetes":
+#@overlay/match by=overlay.subset({"kind":"ConfigMap","metadata":{"name":"privileged-hook-extension-arc-runner"}}),expects=1
+---
+metadata:
+  #@overlay/match missing_ok=True
+  name: #@ "privileged-hook-extension-" + data.values.installation.name
+data:
+  #@overlay/match missing_ok=True
+  content: #@ yaml.encode(build_hook_extension_spec())
 #@ end
