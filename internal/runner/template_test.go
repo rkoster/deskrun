@@ -56,7 +56,7 @@ func TestPrivilegedContainerTemplateGeneration(t *testing.T) {
 			InstanceNum:  0,
 			Namespace:    "arc-systems",
 		}
-		
+
 		processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 		require.NoError(t, err)
 		hookExtension := string(processedYAML)
@@ -225,7 +225,7 @@ func TestMultiInstanceDockerCapabilities(t *testing.T) {
 				InstanceNum:  i,
 				Namespace:    "arc-systems",
 			}
-			
+
 			processedYAML, err := processor.ProcessTemplate(templates.TemplateTypeScaleSet, config)
 			require.NoError(t, err)
 			hookExtension := string(processedYAML)
