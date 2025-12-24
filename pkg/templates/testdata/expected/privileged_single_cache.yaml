@@ -225,6 +225,107 @@ subjects:
   name: arc-gha-rs-controller
   namespace: arc-systems
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: privileged-hook-extension-test-runner
+  namespace: arc-systems
+data:
+  content: |
+    spec:
+      hostPID: true
+      hostIPC: true
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: $job
+        securityContext:
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            - NET_ADMIN
+            - SYS_PTRACE
+            - SYS_CHROOT
+            - SETFCAP
+            - SETPCAP
+            - NET_RAW
+            - IPC_LOCK
+            - SYS_RESOURCE
+            - MKNOD
+            - AUDIT_WRITE
+            - AUDIT_CONTROL
+        volumeMounts:
+        - name: sys
+          mountPath: /sys
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
+          mountPropagation: Bidirectional
+        - name: proc
+          mountPath: /proc
+        - name: dev
+          mountPath: /dev
+        - name: dev-pts
+          mountPath: /dev/pts
+        - name: shm
+          mountPath: /dev/shm
+        - name: cache-0
+          mountPath: /var/lib/docker
+        - name: gh-ws-temp
+          mountPath: /__w/_temp
+        - name: gh-ws-actions
+          mountPath: /__w/_actions
+        - name: gh-ws-tool
+          mountPath: /__w/_tool
+        - name: github-home
+          mountPath: /github/home
+        - name: github-flow
+          mountPath: /github/workflow
+      volumes:
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: dev-pts
+        hostPath:
+          path: /dev/pts
+          type: Directory
+      - name: shm
+        hostPath:
+          path: /dev/shm
+          type: Directory
+      - name: cache-0
+        hostPath:
+          path: /var/lib/docker
+          type: DirectoryOrCreate
+      - name: gh-ws-temp
+        emptyDir: {}
+      - name: gh-ws-actions
+        emptyDir: {}
+      - name: gh-ws-tool
+        emptyDir: {}
+      - name: github-home
+        emptyDir: {}
+      - name: github-flow
+        emptyDir: {}
+---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
 metadata:

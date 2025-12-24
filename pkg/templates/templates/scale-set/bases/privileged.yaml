@@ -210,6 +210,15 @@ subjects:
   namespace: 
     arc-systems
 ---
+#! Source: hook-extension-configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: privileged-hook-extension-arc-runner
+  namespace: arc-systems
+data:
+  content: ""
+---
 #! Source: gha-runner-scale-set/templates/autoscalingrunnerset.yaml
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
