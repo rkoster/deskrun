@@ -16,6 +16,29 @@
 #@   spec["hostIPC"] = True
 #@   spec["securityContext"] = {"runAsUser": 0, "runAsGroup": 0, "fsGroup": 0}
 #@   
+#@   # Build init container to set up glibc compatibility layer AND copy node externals.
+#@   # This enables Nixery images to run GitHub Actions' node binary which requires glibc.
+#@   # We copy glibc libs from the actions-runner image (Ubuntu-based) which has FHS-compatible
+#@   # library paths hardcoded in the dynamic linker. This avoids needing apt-get install.
+#@   # We also copy the node externals from /home/runner/externals to /__e since the job
+#@   # container runs in a separate pod and doesn't share filesystem with the runner.
+#@   initContainer = {
+#@     "name": "setup-glibc-compat",
+#@     "image": "ghcr.io/actions/actions-runner:latest",
+#@     "command": ["sh", "-c"],
+#@     "args": [
+#@       "for lib in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libstdc++.so.6 libgcc_s.so.1; do " +
+#@       "[ -f \"/lib/x86_64-linux-gnu/$lib\" ] && cp -L \"/lib/x86_64-linux-gnu/$lib\" /glibc-compat/; done; " +
+#@       "chmod 755 /glibc-compat/*; " +
+#@       "cp -r /home/runner/externals/* /externals/"
+#@     ],
+#@     "volumeMounts": [
+#@       {"name": "glibc-compat", "mountPath": "/glibc-compat"},
+#@       {"name": "externals", "mountPath": "/externals"}
+#@     ]
+#@   }
+#@   spec["initContainers"] = [initContainer]
+#@   
 #@   # Build container spec
 #@   container = {}
 #@   container["name"] = "$job"
@@ -34,13 +57,18 @@
 #@   }
 #@   
 #@   # Build volumeMounts
+#@   # Note: externals (/__e), work (/__w), and github (/github) volumes/mounts are automatically
+#@   # added by the k8s-novolume hooks, so we don't include them here to avoid duplicates.
+#@   # The init container populates the hooks' externals volume with node binaries.
 #@   volumeMounts = [
 #@     {"name": "sys", "mountPath": "/sys"},
 #@     {"name": "cgroup", "mountPath": "/sys/fs/cgroup", "mountPropagation": "Bidirectional"},
 #@     {"name": "proc", "mountPath": "/proc"},
 #@     {"name": "dev", "mountPath": "/dev"},
 #@     {"name": "dev-pts", "mountPath": "/dev/pts"},
-#@     {"name": "shm", "mountPath": "/dev/shm"}
+#@     {"name": "shm", "mountPath": "/dev/shm"},
+#@     {"name": "glibc-compat", "mountPath": "/lib64"},
+#@     {"name": "glibc-compat", "mountPath": "/lib/x86_64-linux-gnu"}
 #@   ]
 #@   
 #@   # Add cache path volume mounts
@@ -48,7 +76,11 @@
 #@     volumeMounts.append({"name": "cache-" + str(i), "mountPath": cachePath.target})
 #@   end
 #@   
-#@   # Add GitHub workspace volume mounts
+#@   # Add GitHub workspace volume mounts for temporary directories
+#@   # Note: externals (/__e), work (/__w), and github (/github) volumes are automatically
+#@   # added by the k8s-novolume hooks, so we don't include them here to avoid duplicates.
+#@   # However, we must ensure the runner pod has these volumes defined (in the ARS spec)
+#@   # so the hooks can merge them properly.
 #@   volumeMounts.extend([
 #@     {"name": "gh-ws-temp", "mountPath": "/__w/_temp"},
 #@     {"name": "gh-ws-actions", "mountPath": "/__w/_actions"},
@@ -60,13 +92,16 @@
 #@   container["volumeMounts"] = volumeMounts
 #@   
 #@   # Build volumes
+#@   # Note: externals, work, and github volumes are automatically added by the
+#@   # k8s-novolume hooks, so we don't include them here to avoid duplicates.
 #@   volumes = [
 #@     {"name": "sys", "hostPath": {"path": "/sys", "type": "Directory"}},
 #@     {"name": "cgroup", "hostPath": {"path": "/sys/fs/cgroup", "type": "Directory"}},
 #@     {"name": "proc", "hostPath": {"path": "/proc", "type": "Directory"}},
 #@     {"name": "dev", "hostPath": {"path": "/dev", "type": "Directory"}},
 #@     {"name": "dev-pts", "hostPath": {"path": "/dev/pts", "type": "Directory"}},
-#@     {"name": "shm", "hostPath": {"path": "/dev/shm", "type": "Directory"}}
+#@     {"name": "shm", "hostPath": {"path": "/dev/shm", "type": "Directory"}},
+#@     {"name": "glibc-compat", "emptyDir": {}}
 #@   ]
 #@   
 #@   # Add cache path volumes
@@ -83,7 +118,9 @@
 #@     volumes.append({"name": "cache-" + str(i), "hostPath": {"path": cache_source, "type": "DirectoryOrCreate"}})
 #@   end
 #@   
-#@   # Add GitHub workspace volumes
+#@   # Add GitHub workspace volumes for temporary directories
+#@   # Note: externals, work, and github volumes are automatically added by the
+#@   # k8s-novolume hooks, so we don't include them here to avoid duplicates.
 #@   volumes.extend([
 #@     {"name": "gh-ws-temp", "emptyDir": {}},
 #@     {"name": "gh-ws-actions", "emptyDir": {}},
@@ -99,6 +136,8 @@
 #@ end
 
 #! Apply name transformations to Secret
+#! The Secret must be deleted AFTER the AutoscalingRunnerSet because the ARC controller
+#! needs the secret to authenticate with GitHub when deregistering the runner scale set.
 #@overlay/match by=overlay.subset({"kind":"Secret"}),expects="0+"
 ---
 metadata:
@@ -111,6 +150,11 @@ metadata:
     app.kubernetes.io/instance: #@ data.values.installation.name
     #@overlay/match missing_ok=True
     actions.github.com/scale-set-name: #@ data.values.installation.name
+  annotations:
+    #@overlay/match missing_ok=True
+    kapp.k14s.io/change-group: #@ "arc-secret/" + data.values.installation.name
+    #@overlay/match missing_ok=True
+    kapp.k14s.io/change-rule.delete: #@ "delete after deleting arc-ars/" + data.values.installation.name
 data:
   #@overlay/match missing_ok=True
   github_token: #@ base64.encode(data.values.installation.authValue)
@@ -227,6 +271,8 @@ metadata:
     actions.github.com/scale-set-name: #@ data.values.installation.name
   annotations:
     #@overlay/match missing_ok=True
+    kapp.k14s.io/change-group: #@ "arc-ars/" + data.values.installation.name
+    #@overlay/match missing_ok=True
     actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
     #@overlay/match missing_ok=True
     actions.github.com/cleanup-manager-role-binding: #@ data.values.installation.name + "-gha-rs-manager"
@@ -260,6 +306,8 @@ metadata:
     #@overlay/match missing_ok=True
     actions.github.com/scale-set-name: #@ data.values.installation.name
   annotations:
+    #@overlay/match missing_ok=True
+    kapp.k14s.io/change-group: #@ "arc-ars/" + data.values.installation.name
     #@overlay/match missing_ok=True
     actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
     #@overlay/match missing_ok=True
@@ -298,6 +346,8 @@ metadata:
     #@overlay/match missing_ok=True
     actions.github.com/scale-set-name: #@ data.values.installation.name
   annotations:
+    #@overlay/match missing_ok=True
+    kapp.k14s.io/change-group: #@ "arc-ars/" + data.values.installation.name
     #@overlay/match missing_ok=True
     actions.github.com/cleanup-github-secret-name: #@ data.values.installation.name + "-gha-rs-github-secret"
     #@overlay/match missing_ok=True

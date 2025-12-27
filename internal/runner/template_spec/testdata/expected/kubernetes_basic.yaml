@@ -29,7 +29,9 @@ metadata:
     app.kubernetes.io/part-of: gha-rs
     actions.github.com/scale-set-name: test-runner
     actions.github.com/scale-set-namespace: arc-systems
-  annotations: null
+  annotations:
+    kapp.k14s.io/change-group: arc-secret/test-runner
+    kapp.k14s.io/change-rule.delete: delete after deleting arc-ars/test-runner
   finalizers:
   - actions.github.com/cleanup-protection
 data:
@@ -248,6 +250,7 @@ metadata:
     actions.github.com/cleanup-kubernetes-mode-role-binding-name: test-runner-gha-rs-kube-mode
     actions.github.com/cleanup-kubernetes-mode-role-name: test-runner-gha-rs-kube-mode
     actions.github.com/cleanup-kubernetes-mode-service-account-name: test-runner-gha-rs-kube-mode
+    kapp.k14s.io/change-group: arc-ars/test-runner
 spec:
   githubConfigUrl: https://github.com/test/repo
   githubConfigSecret: test-runner-gha-rs-github-secret

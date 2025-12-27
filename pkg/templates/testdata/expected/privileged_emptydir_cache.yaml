@@ -29,7 +29,9 @@ metadata:
     app.kubernetes.io/part-of: gha-rs
     actions.github.com/scale-set-name: test-runner
     actions.github.com/scale-set-namespace: arc-systems
-  annotations: null
+  annotations:
+    kapp.k14s.io/change-group: arc-secret/test-runner
+    kapp.k14s.io/change-rule.delete: delete after deleting arc-ars/test-runner
   finalizers:
   - actions.github.com/cleanup-protection
 data:
@@ -239,6 +241,19 @@ data:
         runAsUser: 0
         runAsGroup: 0
         fsGroup: 0
+      initContainers:
+      - name: setup-glibc-compat
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+        - sh
+        - -c
+        args:
+        - for lib in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libstdc++.so.6 libgcc_s.so.1; do [ -f "/lib/x86_64-linux-gnu/$lib" ] && cp -L "/lib/x86_64-linux-gnu/$lib" /glibc-compat/; done; chmod 755 /glibc-compat/*; cp -r /home/runner/externals/* /externals/
+        volumeMounts:
+        - name: glibc-compat
+          mountPath: /glibc-compat
+        - name: externals
+          mountPath: /externals
       containers:
       - name: $job
         securityContext:
@@ -274,6 +289,10 @@ data:
           mountPath: /dev/pts
         - name: shm
           mountPath: /dev/shm
+        - name: glibc-compat
+          mountPath: /lib64
+        - name: glibc-compat
+          mountPath: /lib/x86_64-linux-gnu
         - name: cache-0
           mountPath: /var/lib/docker
         - name: gh-ws-temp
@@ -311,6 +330,8 @@ data:
         hostPath:
           path: /dev/shm
           type: Directory
+      - name: glibc-compat
+        emptyDir: {}
       - name: cache-0
         hostPath:
           path: /tmp/github-runner-cache/test-runner-1/cache-0
@@ -349,6 +370,7 @@ metadata:
     actions.github.com/cleanup-kubernetes-mode-role-binding-name: test-runner-gha-rs-kube-mode
     actions.github.com/cleanup-kubernetes-mode-role-name: test-runner-gha-rs-kube-mode
     actions.github.com/cleanup-kubernetes-mode-service-account-name: test-runner-gha-rs-kube-mode
+    kapp.k14s.io/change-group: arc-ars/test-runner
 spec:
   githubConfigUrl: https://github.com/test/repo
   githubConfigSecret: test-runner-gha-rs-github-secret
