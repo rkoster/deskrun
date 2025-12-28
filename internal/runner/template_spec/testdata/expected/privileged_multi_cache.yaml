@@ -297,16 +297,6 @@ data:
           mountPath: /var/lib/docker
         - name: cache-1
           mountPath: /nix/store
-        - name: gh-ws-temp
-          mountPath: /__w/_temp
-        - name: gh-ws-actions
-          mountPath: /__w/_actions
-        - name: gh-ws-tool
-          mountPath: /__w/_tool
-        - name: github-home
-          mountPath: /github/home
-        - name: github-flow
-          mountPath: /github/workflow
       volumes:
       - name: sys
         hostPath:
@@ -342,16 +332,6 @@ data:
         hostPath:
           path: /nix/store
           type: DirectoryOrCreate
-      - name: gh-ws-temp
-        emptyDir: {}
-      - name: gh-ws-actions
-        emptyDir: {}
-      - name: gh-ws-tool
-        emptyDir: {}
-      - name: github-home
-        emptyDir: {}
-      - name: github-flow
-        emptyDir: {}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet

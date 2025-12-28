@@ -76,18 +76,9 @@
 #@     volumeMounts.append({"name": "cache-" + str(i), "mountPath": cachePath.target})
 #@   end
 #@   
-#@   # Add GitHub workspace volume mounts for temporary directories
 #@   # Note: externals (/__e), work (/__w), and github (/github) volumes are automatically
 #@   # added by the k8s-novolume hooks, so we don't include them here to avoid duplicates.
-#@   # However, we must ensure the runner pod has these volumes defined (in the ARS spec)
-#@   # so the hooks can merge them properly.
-#@   volumeMounts.extend([
-#@     {"name": "gh-ws-temp", "mountPath": "/__w/_temp"},
-#@     {"name": "gh-ws-actions", "mountPath": "/__w/_actions"},
-#@     {"name": "gh-ws-tool", "mountPath": "/__w/_tool"},
-#@     {"name": "github-home", "mountPath": "/github/home"},
-#@     {"name": "github-flow", "mountPath": "/github/workflow"}
-#@   ])
+#@   # The hooks handle all GitHub workspace paths including /github/workflow/event.json
 #@   
 #@   container["volumeMounts"] = volumeMounts
 #@   
@@ -117,17 +108,6 @@
 #@     end
 #@     volumes.append({"name": "cache-" + str(i), "hostPath": {"path": cache_source, "type": "DirectoryOrCreate"}})
 #@   end
-#@   
-#@   # Add GitHub workspace volumes for temporary directories
-#@   # Note: externals, work, and github volumes are automatically added by the
-#@   # k8s-novolume hooks, so we don't include them here to avoid duplicates.
-#@   volumes.extend([
-#@     {"name": "gh-ws-temp", "emptyDir": {}},
-#@     {"name": "gh-ws-actions", "emptyDir": {}},
-#@     {"name": "gh-ws-tool", "emptyDir": {}},
-#@     {"name": "github-home", "emptyDir": {}},
-#@     {"name": "github-flow", "emptyDir": {}}
-#@   ])
 #@   
 #@   spec["containers"] = [container]
 #@   spec["volumes"] = volumes
