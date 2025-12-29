@@ -16,13 +16,14 @@
 #@   spec["hostIPC"] = True
 #@   spec["securityContext"] = {"runAsUser": 0, "runAsGroup": 0, "fsGroup": 0}
 #@   
-#@   # Build init container to set up glibc compatibility layer AND copy node externals.
-#@   # This enables Nixery images to run GitHub Actions' node binary which requires glibc.
-#@   # We copy glibc libs from the actions-runner image (Ubuntu-based) which has FHS-compatible
-#@   # library paths hardcoded in the dynamic linker. This avoids needing apt-get install.
-#@   # We also copy the node externals from /home/runner/externals to /__e since the job
-#@   # container runs in a separate pod and doesn't share filesystem with the runner.
-#@   initContainer = {
+#@   # Build init containers:
+#@   # 1. Setup glibc compatibility layer AND copy node externals.
+#@   #    This enables Nixery images to run GitHub Actions' node binary which requires glibc.
+#@   #    We copy glibc libs from the actions-runner image (Ubuntu-based) which has FHS-compatible
+#@   #    library paths hardcoded in the dynamic linker. This avoids needing apt-get install.
+#@   #    We also copy the node externals from /home/runner/externals to /__e since the job
+#@   #    container runs in a separate pod and doesn't share filesystem with the runner.
+#@   glibcInitContainer = {
 #@     "name": "setup-glibc-compat",
 #@     "image": "ghcr.io/actions/actions-runner:latest",
 #@     "command": ["sh", "-c"],
@@ -37,7 +38,32 @@
 #@       {"name": "externals", "mountPath": "/externals"}
 #@     ]
 #@   }
-#@   spec["initContainers"] = [initContainer]
+#@   
+#@   # 2. Prepare GitHub workspace directories.
+#@   #    The GitHub Actions runner-container-hooks package has a bug where the prepare script
+#@   #    only runs when userMountVolumes are defined. This init container explicitly copies
+#@   #    the GitHub workspace directories from /__w/_temp/ to /github/ before the main
+#@   #    container starts, ensuring /github/workflow/event.json exists for actions like
+#@   #    Docker Buildx that require GITHUB_EVENT_PATH.
+#@   #    See: https://github.com/rkoster/deskrun/issues/28
+#@   githubWorkspaceInitContainer = {
+#@     "name": "prepare-github-workspace",
+#@     "image": "ghcr.io/actions/actions-runner:latest",
+#@     "command": ["sh", "-c"],
+#@     "args": [
+#@       "set -e; " +
+#@       "echo 'Preparing GitHub workspace directories...'; " +
+#@       "cp -R /__w/_temp/_github_home /github/home 2>/dev/null || echo 'No _github_home to copy'; " +
+#@       "cp -R /__w/_temp/_github_workflow /github/workflow 2>/dev/null || echo 'No _github_workflow to copy'; " +
+#@       "echo 'GitHub workspace preparation complete'"
+#@     ],
+#@     "volumeMounts": [
+#@       {"name": "work", "mountPath": "/__w"},
+#@       {"name": "github", "mountPath": "/github"}
+#@     ]
+#@   }
+#@   
+#@   spec["initContainers"] = [glibcInitContainer, githubWorkspaceInitContainer]
 #@   
 #@   # Build container spec
 #@   container = {}
@@ -75,10 +101,6 @@
 #@   for i, cachePath in enumerate(data.values.installation.cachePaths):
 #@     volumeMounts.append({"name": "cache-" + str(i), "mountPath": cachePath.target})
 #@   end
-#@   
-#@   # Note: externals (/__e), work (/__w), and github (/github) volumes are automatically
-#@   # added by the k8s-novolume hooks, so we don't include them here to avoid duplicates.
-#@   # The hooks handle all GitHub workspace paths including /github/workflow/event.json
 #@   
 #@   container["volumeMounts"] = volumeMounts
 #@   
