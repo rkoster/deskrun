@@ -293,6 +293,8 @@ data:
           mountPath: /lib64
         - name: glibc-compat
           mountPath: /lib/x86_64-linux-gnu
+        - name: dummy-prepare-trigger
+          mountPath: /tmp/dummy-prepare
       volumes:
       - name: sys
         hostPath:
@@ -319,6 +321,8 @@ data:
           path: /dev/shm
           type: Directory
       - name: glibc-compat
+        emptyDir: {}
+      - name: dummy-prepare-trigger
         emptyDir: {}
 ---
 apiVersion: actions.github.com/v1alpha1

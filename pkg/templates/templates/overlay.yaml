@@ -76,6 +76,11 @@
 #@     volumeMounts.append({"name": "cache-" + str(i), "mountPath": cachePath.target})
 #@   end
 #@   
+#@   # WORKAROUND: Add dummy user mount volume to force k8s-novolume hook prepare script execution
+#@   # The prepare script only runs when userMountVolumes exist, but it's needed to copy /github/workflow content
+#@   # See: https://github.com/rkoster/deskrun/issues/26
+#@   volumeMounts.append({"name": "dummy-prepare-trigger", "mountPath": "/tmp/dummy-prepare"})
+#@   
 #@   # Note: externals (/__e), work (/__w), and github (/github) volumes are automatically
 #@   # added by the k8s-novolume hooks, so we don't include them here to avoid duplicates.
 #@   # The hooks handle all GitHub workspace paths including /github/workflow/event.json
@@ -108,6 +113,9 @@
 #@     end
 #@     volumes.append({"name": "cache-" + str(i), "hostPath": {"path": cache_source, "type": "DirectoryOrCreate"}})
 #@   end
+#@   
+#@   # WORKAROUND: Dummy volume to trigger prepare script (see volumeMounts comment above)
+#@   volumes.append({"name": "dummy-prepare-trigger", "emptyDir": {}})
 #@   
 #@   spec["containers"] = [container]
 #@   spec["volumes"] = volumes
