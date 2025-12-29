@@ -1,3 +1,13 @@
+#! Placeholder ConfigMap for privileged mode hook extension
+#! This ConfigMap is populated by the overlay with the actual hook extension spec
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: privileged-hook-extension-arc-runner
+  namespace: arc-systems
+data:
+  content: ""
+---
 ---
 #! Source: gha-runner-scale-set/templates/kube_mode_serviceaccount.yaml
 apiVersion: v1
@@ -209,15 +219,6 @@ subjects:
     arc-gha-rs-controller
   namespace: 
     arc-systems
----
-#! Source: hook-extension-configmap
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: privileged-hook-extension-arc-runner
-  namespace: arc-systems
-data:
-  content: ""
 ---
 #! Source: gha-runner-scale-set/templates/autoscalingrunnerset.yaml
 apiVersion: actions.github.com/v1alpha1

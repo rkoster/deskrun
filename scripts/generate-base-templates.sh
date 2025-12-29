@@ -48,6 +48,20 @@ echo "    -> $OUTPUT_DIR/dind.yaml"
 # Generate Privileged mode template (kubernetes-novolume)
 # This is used for cached-privileged-kubernetes mode
 echo "  Generating privileged mode template..."
+# First, add a placeholder ConfigMap for hook extension (will be overlayed with actual content)
+cat > "$OUTPUT_DIR/privileged.yaml" << 'EOF'
+#! Placeholder ConfigMap for privileged mode hook extension
+#! This ConfigMap is populated by the overlay with the actual hook extension spec
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: privileged-hook-extension-arc-runner
+  namespace: arc-systems
+data:
+  content: ""
+---
+EOF
+# Then append the helm-generated template
 helm template arc-runner "$UPSTREAM_DIR/gha-runner-scale-set" \
     "${COMMON_VALUES[@]}" \
     --set containerMode.type=kubernetes \
@@ -55,7 +69,7 @@ helm template arc-runner "$UPSTREAM_DIR/gha-runner-scale-set" \
     --set containerMode.kubernetesModeWorkVolumeClaim.storageClassName=standard \
     --set containerMode.kubernetesModeWorkVolumeClaim.resources.requests.storage=1Gi \
     | sed 's/^# Source:/#! Source:/g' \
-    > "$OUTPUT_DIR/privileged.yaml"
+    >> "$OUTPUT_DIR/privileged.yaml"
 echo "    -> $OUTPUT_DIR/privileged.yaml"
 
 echo ""
