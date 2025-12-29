@@ -1,4 +1,116 @@
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: privileged-hook-extension-test-runner
+  namespace: arc-systems
+data:
+  content: |
+    spec:
+      hostPID: true
+      hostIPC: true
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      initContainers:
+      - name: setup-glibc-compat
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+        - sh
+        - -c
+        args:
+        - for lib in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libstdc++.so.6 libgcc_s.so.1; do [ -f "/lib/x86_64-linux-gnu/$lib" ] && cp -L "/lib/x86_64-linux-gnu/$lib" /glibc-compat/; done; chmod 755 /glibc-compat/*; cp -r /home/runner/externals/* /externals/
+        volumeMounts:
+        - name: glibc-compat
+          mountPath: /glibc-compat
+        - name: externals
+          mountPath: /externals
+      - name: prepare-github-workspace
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+        - sh
+        - -c
+        args:
+        - set -e; echo 'Preparing GitHub workspace directories...'; cp -R /__w/_temp/_github_home /github/home 2>/dev/null || echo 'No _github_home to copy'; cp -R /__w/_temp/_github_workflow /github/workflow 2>/dev/null || echo 'No _github_workflow to copy'; echo 'GitHub workspace preparation complete'
+        volumeMounts:
+        - name: work
+          mountPath: /__w
+        - name: github
+          mountPath: /github
+      containers:
+      - name: $job
+        securityContext:
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            - NET_ADMIN
+            - SYS_PTRACE
+            - SYS_CHROOT
+            - SETFCAP
+            - SETPCAP
+            - NET_RAW
+            - IPC_LOCK
+            - SYS_RESOURCE
+            - MKNOD
+            - AUDIT_WRITE
+            - AUDIT_CONTROL
+        volumeMounts:
+        - name: sys
+          mountPath: /sys
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
+          mountPropagation: Bidirectional
+        - name: proc
+          mountPath: /proc
+        - name: dev
+          mountPath: /dev
+        - name: dev-pts
+          mountPath: /dev/pts
+        - name: shm
+          mountPath: /dev/shm
+        - name: glibc-compat
+          mountPath: /lib64
+        - name: glibc-compat
+          mountPath: /lib/x86_64-linux-gnu
+        - name: cache-0
+          mountPath: /var/lib/docker
+      volumes:
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: dev-pts
+        hostPath:
+          path: /dev/pts
+          type: Directory
+      - name: shm
+        hostPath:
+          path: /dev/shm
+          type: Directory
+      - name: glibc-compat
+        emptyDir: {}
+      - name: cache-0
+        hostPath:
+          path: /tmp/github-runner-cache/test-runner-1/cache-0
+          type: DirectoryOrCreate
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: test-runner-gha-rs-kube-mode
@@ -226,118 +338,6 @@ subjects:
 - kind: ServiceAccount
   name: arc-gha-rs-controller
   namespace: arc-systems
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: privileged-hook-extension-test-runner
-  namespace: arc-systems
-data:
-  content: |
-    spec:
-      hostPID: true
-      hostIPC: true
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-        fsGroup: 0
-      initContainers:
-      - name: setup-glibc-compat
-        image: ghcr.io/actions/actions-runner:latest
-        command:
-        - sh
-        - -c
-        args:
-        - for lib in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libstdc++.so.6 libgcc_s.so.1; do [ -f "/lib/x86_64-linux-gnu/$lib" ] && cp -L "/lib/x86_64-linux-gnu/$lib" /glibc-compat/; done; chmod 755 /glibc-compat/*; cp -r /home/runner/externals/* /externals/
-        volumeMounts:
-        - name: glibc-compat
-          mountPath: /glibc-compat
-        - name: externals
-          mountPath: /externals
-      - name: prepare-github-workspace
-        image: ghcr.io/actions/actions-runner:latest
-        command:
-        - sh
-        - -c
-        args:
-        - set -e; echo 'Preparing GitHub workspace directories...'; cp -R /__w/_temp/_github_home /github/home 2>/dev/null || echo 'No _github_home to copy'; cp -R /__w/_temp/_github_workflow /github/workflow 2>/dev/null || echo 'No _github_workflow to copy'; echo 'GitHub workspace preparation complete'
-        volumeMounts:
-        - name: work
-          mountPath: /__w
-        - name: github
-          mountPath: /github
-      containers:
-      - name: $job
-        securityContext:
-          privileged: true
-          runAsUser: 0
-          runAsGroup: 0
-          allowPrivilegeEscalation: true
-          capabilities:
-            add:
-            - SYS_ADMIN
-            - NET_ADMIN
-            - SYS_PTRACE
-            - SYS_CHROOT
-            - SETFCAP
-            - SETPCAP
-            - NET_RAW
-            - IPC_LOCK
-            - SYS_RESOURCE
-            - MKNOD
-            - AUDIT_WRITE
-            - AUDIT_CONTROL
-        volumeMounts:
-        - name: sys
-          mountPath: /sys
-        - name: cgroup
-          mountPath: /sys/fs/cgroup
-          mountPropagation: Bidirectional
-        - name: proc
-          mountPath: /proc
-        - name: dev
-          mountPath: /dev
-        - name: dev-pts
-          mountPath: /dev/pts
-        - name: shm
-          mountPath: /dev/shm
-        - name: glibc-compat
-          mountPath: /lib64
-        - name: glibc-compat
-          mountPath: /lib/x86_64-linux-gnu
-        - name: cache-0
-          mountPath: /var/lib/docker
-      volumes:
-      - name: sys
-        hostPath:
-          path: /sys
-          type: Directory
-      - name: cgroup
-        hostPath:
-          path: /sys/fs/cgroup
-          type: Directory
-      - name: proc
-        hostPath:
-          path: /proc
-          type: Directory
-      - name: dev
-        hostPath:
-          path: /dev
-          type: Directory
-      - name: dev-pts
-        hostPath:
-          path: /dev/pts
-          type: Directory
-      - name: shm
-        hostPath:
-          path: /dev/shm
-          type: Directory
-      - name: glibc-compat
-        emptyDir: {}
-      - name: cache-0
-        hostPath:
-          path: /tmp/github-runner-cache/test-runner-1/cache-0
-          type: DirectoryOrCreate
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet

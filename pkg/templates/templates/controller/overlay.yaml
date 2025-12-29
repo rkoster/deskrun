@@ -1,10 +1,13 @@
 #@ load("@ytt:overlay", "overlay")
 
-#! Add create/delete/get permissions for roles and rolebindings
-#! The ARC controller needs these to dynamically create roles for listener pods
-#! Original upstream only has: list, watch, patch for roles; list, watch for rolebindings
+#! Add create/delete/get/patch permissions for roles, rolebindings, and serviceaccounts
+#! The ARC controller needs these to:
+#! - Dynamically create roles for listener pods
+#! - Remove finalizers during cleanup (requires patch permission)
+#! Original upstream only has: list, watch, patch for roles; list, watch for rolebindings; list, watch for serviceaccounts
 #! We need: create, delete, get, list, patch, watch for roles
-#!          create, delete, get, list, watch for rolebindings
+#!          create, delete, get, list, patch, watch for rolebindings
+#!          create, delete, get, list, patch, watch for serviceaccounts
 #@overlay/match by=overlay.subset({"kind": "ClusterRole", "metadata": {"name": "arc-controller-gha-rs-controller"}})
 ---
 rules:
@@ -16,8 +19,19 @@ rules:
   - delete
   - get
   - list
+  - patch
   - watch
 #@overlay/match by=overlay.subset({"resources": ["roles"]})
+-
+  #@overlay/replace
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+#@overlay/match by=overlay.subset({"resources": ["serviceaccounts"]})
 -
   #@overlay/replace
   verbs:
