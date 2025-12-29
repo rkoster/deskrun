@@ -297,6 +297,8 @@ data:
           mountPath: /var/lib/docker
         - name: cache-1
           mountPath: /nix/store
+        - name: dummy-prepare-trigger
+          mountPath: /tmp/dummy-prepare
       volumes:
       - name: sys
         hostPath:
@@ -332,6 +334,8 @@ data:
         hostPath:
           path: /nix/store
           type: DirectoryOrCreate
+      - name: dummy-prepare-trigger
+        emptyDir: {}
 ---
 apiVersion: actions.github.com/v1alpha1
 kind: AutoscalingRunnerSet
