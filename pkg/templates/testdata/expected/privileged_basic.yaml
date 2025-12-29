@@ -254,6 +254,18 @@ data:
           mountPath: /glibc-compat
         - name: externals
           mountPath: /externals
+      - name: prepare-github-workspace
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+        - sh
+        - -c
+        args:
+        - set -e; echo 'Preparing GitHub workspace directories...'; cp -R /__w/_temp/_github_home /github/home 2>/dev/null || echo 'No _github_home to copy'; cp -R /__w/_temp/_github_workflow /github/workflow 2>/dev/null || echo 'No _github_workflow to copy'; echo 'GitHub workspace preparation complete'
+        volumeMounts:
+        - name: work
+          mountPath: /__w
+        - name: github
+          mountPath: /github
       containers:
       - name: $job
         securityContext:
@@ -293,8 +305,6 @@ data:
           mountPath: /lib64
         - name: glibc-compat
           mountPath: /lib/x86_64-linux-gnu
-        - name: dummy-prepare-trigger
-          mountPath: /tmp/dummy-prepare
       volumes:
       - name: sys
         hostPath:
@@ -321,8 +331,6 @@ data:
           path: /dev/shm
           type: Directory
       - name: glibc-compat
-        emptyDir: {}
-      - name: dummy-prepare-trigger
         emptyDir: {}
 ---
 apiVersion: actions.github.com/v1alpha1
