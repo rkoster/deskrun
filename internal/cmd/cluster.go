@@ -65,7 +65,7 @@ func runClusterCreate(cmd *cobra.Command, args []string) error {
 	// Detect deskrun cache directory
 	deskrunCache := cluster.DetectDeskrunCache()
 	if deskrunCache != nil {
-		fmt.Printf("Detected deskrun cache directory: %s\n", deskrunCache.HostPath)
+		fmt.Printf("Using deskrun cache directory: %s\n", deskrunCache.HostPath)
 	}
 
 	clusterConfig := &types.ClusterConfig{

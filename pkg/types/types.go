@@ -45,13 +45,17 @@ const (
 type ClusterConfig struct {
 	Name         string
 	Network      string
-	NixStore     *NixMount // Optional nix store mount
-	NixSocket    *NixMount // Optional nix socket mount
-	DeskrunCache *NixMount // Optional deskrun cache mount
+	NixStore     *Mount // Optional nix store mount
+	NixSocket    *Mount // Optional nix socket mount
+	DeskrunCache *Mount // Optional deskrun cache mount
 }
 
-// NixMount represents a nix-related mount configuration
-type NixMount struct {
+// Mount represents a host-to-container mount configuration
+type Mount struct {
 	HostPath      string // Host path to mount from
 	ContainerPath string // Container path to mount to
 }
+
+// NixMount is deprecated: use Mount instead
+// Kept for backward compatibility
+type NixMount = Mount
