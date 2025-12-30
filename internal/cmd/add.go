@@ -143,11 +143,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		} else {
 			// Single path provided - use as target path, auto-generate source path
 			target = path
-			// Auto-generate source path by creating a unique directory under /tmp/deskrun-cache
+			// Auto-generate source path by creating a unique directory under /host-cache/deskrun
 			// Replace slashes with dashes and remove leading slash for path safety
 			safePath := strings.TrimPrefix(path, "/")
 			safePath = strings.ReplaceAll(safePath, "/", "-")
-			source = fmt.Sprintf("/tmp/deskrun-cache/%s", safePath)
+			source = fmt.Sprintf("/host-cache/deskrun/%s", safePath)
 		}
 
 		cachePaths = append(cachePaths, types.CachePath{

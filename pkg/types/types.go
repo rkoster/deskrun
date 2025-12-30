@@ -43,10 +43,11 @@ const (
 
 // ClusterConfig represents the kind cluster configuration
 type ClusterConfig struct {
-	Name      string
-	Network   string
-	NixStore  *NixMount // Optional nix store mount
-	NixSocket *NixMount // Optional nix socket mount
+	Name         string
+	Network      string
+	NixStore     *NixMount // Optional nix store mount
+	NixSocket    *NixMount // Optional nix socket mount
+	DeskrunCache *NixMount // Optional deskrun cache mount
 }
 
 // NixMount represents a nix-related mount configuration

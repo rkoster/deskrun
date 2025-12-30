@@ -119,6 +119,26 @@ func DetectNixMounts() (*types.NixMount, *types.NixMount) {
 	return nixStore, nixSocket
 }
 
+// DetectDeskrunCache detects the host deskrun cache directory and creates mount config
+func DetectDeskrunCache() *types.NixMount {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	deskrunCachePath := filepath.Join(homeDir, ".cache", "deskrun")
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(deskrunCachePath, 0755); err != nil {
+		return nil
+	}
+
+	return &types.NixMount{
+		HostPath:      deskrunCachePath,
+		ContainerPath: "/host-cache/deskrun",
+	}
+}
+
 // buildKindConfig creates a kind cluster configuration with nix mounts
 func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 	config := &v1alpha4.Cluster{
@@ -151,6 +171,13 @@ func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 		extraMounts = append(extraMounts, v1alpha4.Mount{
 			HostPath:      filepath.Dir(m.config.NixSocket.HostPath),
 			ContainerPath: socketDir,
+		})
+	}
+
+	if m.config.DeskrunCache != nil {
+		extraMounts = append(extraMounts, v1alpha4.Mount{
+			HostPath:      m.config.DeskrunCache.HostPath,
+			ContainerPath: m.config.DeskrunCache.ContainerPath,
 		})
 	}
 
