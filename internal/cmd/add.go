@@ -45,11 +45,11 @@ Examples:
   # Add a standard runner (single instance, scales 1-5)
   deskrun add my-runner --repository https://github.com/owner/repo --auth-type pat --auth-value ghp_xxx
 
-  # Add a privileged runner with Nix cache (single instance, scales 1-5)
-  deskrun add nix-runner \
+  # Add a privileged runner with Docker cache (single instance, scales 1-5)
+  deskrun add docker-runner \
     --repository https://github.com/owner/repo \
     --mode cached-privileged-kubernetes \
-    --mount /nix/store \
+    --mount /var/lib/docker \
     --max-runners 5 \
     --auth-type pat --auth-value ghp_xxx
 
@@ -69,10 +69,9 @@ Examples:
 
   # Add a privileged runner with 3 instances for cache isolation
   # Each instance runs exactly 1 runner with dedicated cache paths
-  deskrun add nix-runner \
+  deskrun add multi-runner \
     --repository https://github.com/owner/repo \
     --mode cached-privileged-kubernetes \
-    --mount /nix/store \
     --mount /var/lib/docker \
     --instances 3 \
     --auth-type pat --auth-value ghp_xxx
@@ -173,7 +172,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		// - src:target (explicit source, DirectoryOrCreate type)
 		// - src:target:type (explicit source and type)
 		var source, target string
-		var mountType types.MountType = types.MountTypeDirectoryOrCreate
+		mountType := types.MountTypeDirectoryOrCreate
 
 		parts := strings.Split(path, ":")
 		switch len(parts) {
@@ -206,11 +205,32 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid mount format '%s', expected target, src:target, or src:target:type", path)
 		}
 
+		// Validate that socket mounts always have an explicit source path
+		if mountType == types.MountTypeSocket && source == "" {
+			return fmt.Errorf("socket mount '%s' requires an explicit source path, cannot auto-generate socket paths", target)
+		}
+
 		mounts = append(mounts, types.Mount{
 			Source: source,
 			Target: target,
 			Type:   mountType,
 		})
+	}
+
+	// Validate that there are no duplicate target paths between deprecated --cache
+	// paths (cachePaths) and new --mount targets. Using the same target path with
+	// both flags would result in duplicate volume mounts and cause pod creation
+	// to fail with duplicate mountPath errors.
+	if len(cachePaths) > 0 && len(mounts) > 0 {
+		cacheTargets := make(map[string]struct{}, len(cachePaths))
+		for _, p := range cachePaths {
+			cacheTargets[p.Target] = struct{}{}
+		}
+		for _, m := range mounts {
+			if _, exists := cacheTargets[m.Target]; exists {
+				return fmt.Errorf("duplicate mount target '%s' specified via both --cache and --mount; use only one of these flags for this path", m.Target)
+			}
+		}
 	}
 
 	// Validate parameters including mounts
@@ -293,7 +313,7 @@ func validateAddParams(instances, maxRunners int, containerMode types.ContainerM
 	for _, mount := range mounts {
 		if mount.Target == "/nix/store" {
 			return fmt.Errorf(
-				"mounting /nix/store is not supported in deskrun: " +
+				"mount target /nix/store is not supported in deskrun: " +
 					"mounting host paths directly to /nix/store breaks NixOS containers by overwriting essential NixOS binaries and libraries.\n\n" +
 					"To cache Nix packages, consider:\n" +
 					"1. Use the opencode-workspace-action with overlayfs support for /nix/store caching\n" +

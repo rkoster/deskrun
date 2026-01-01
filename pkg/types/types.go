@@ -40,7 +40,7 @@ const (
 
 // Mount represents a host path to be mounted into pods
 type Mount struct {
-	// Source path on the host machine (empty means auto-generated for DirectoryOrCreate)
+	// Source path on the host machine (can be empty for DirectoryOrCreate to auto-generate; must be provided for Socket types)
 	Source string
 	// Target path inside the container where the mount will be mounted
 	Target string

@@ -27,8 +27,9 @@ installation:
   #@schema/nullable
   mounts:
   - #@schema/desc "Mount configuration"
-    #@schema/desc "Source path on host"
-    source: ""
+    #@schema/desc "Source path on host. Required and must be non-empty for Socket mount types."
+    #@schema/nullable
+    source: null
     #@schema/desc "Target path in container"  
     target: ""
     #@schema/desc "Mount type - must be one of: DirectoryOrCreate, Directory, Socket"
