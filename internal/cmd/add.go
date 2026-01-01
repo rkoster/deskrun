@@ -205,16 +205,20 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid mount format '%s', expected target, src:target, or src:target:type", path)
 		}
 
-		// Validate that socket mounts always have an explicit source path
-		if mountType == types.MountTypeSocket && source == "" {
-			return fmt.Errorf("socket mount '%s' requires an explicit source path, cannot auto-generate socket paths", target)
-		}
-
 		mounts = append(mounts, types.Mount{
 			Source: source,
 			Target: target,
 			Type:   mountType,
 		})
+	}
+
+	// Check for duplicates within mounts
+	mountTargets := make(map[string]struct{}, len(mounts))
+	for _, m := range mounts {
+		if _, exists := mountTargets[m.Target]; exists {
+			return fmt.Errorf("duplicate mount target '%s' specified multiple times", m.Target)
+		}
+		mountTargets[m.Target] = struct{}{}
 	}
 
 	// Validate that there are no duplicate target paths between deprecated --cache
