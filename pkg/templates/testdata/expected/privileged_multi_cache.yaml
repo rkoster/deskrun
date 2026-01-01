@@ -64,9 +64,9 @@ data:
           mountPath: /lib64
         - name: glibc-compat
           mountPath: /lib/x86_64-linux-gnu
-        - name: cache-0
+        - name: mount-0
           mountPath: /var/lib/docker
-        - name: cache-1
+        - name: mount-1
           mountPath: /nix/store
       volumes:
       - name: sys
@@ -95,11 +95,11 @@ data:
           type: Directory
       - name: glibc-compat
         emptyDir: {}
-      - name: cache-0
+      - name: mount-0
         hostPath:
           path: /var/lib/docker
           type: DirectoryOrCreate
-      - name: cache-1
+      - name: mount-1
         hostPath:
           path: /nix/store
           type: DirectoryOrCreate
@@ -384,9 +384,9 @@ spec:
         - name: hook-extension
           mountPath: /etc/hooks
           readOnly: true
-        - name: cache-0
+        - name: mount-0
           mountPath: /var/lib/docker
-        - name: cache-1
+        - name: mount-1
           mountPath: /nix/store
         securityContext:
           privileged: true
@@ -398,11 +398,11 @@ spec:
         configMap:
           name: privileged-hook-extension-test-runner
           defaultMode: 493
-      - name: cache-0
+      - name: mount-0
         hostPath:
           path: /var/lib/docker
           type: DirectoryOrCreate
-      - name: cache-1
+      - name: mount-1
         hostPath:
           path: /nix/store
           type: DirectoryOrCreate

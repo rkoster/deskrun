@@ -28,6 +28,12 @@
       ],
       "test-accept": [
         "ACCEPT_DIFF=true go test ./pkg/templates/... ./internal/runner/..."
+      ],
+      "fmt": [
+        "gofmt -w ."
+      ],
+      "lint": [
+        "make lint"
       ]
     }
   }

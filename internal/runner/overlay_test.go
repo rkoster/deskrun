@@ -296,9 +296,9 @@ var _ = Describe("ytt Overlay Processing", func() {
 				volumeMounts := runnerContainer["volumeMounts"].([]interface{})
 				expectedMounts := map[string]string{
 					"hook-extension": "/etc/hooks",
-					"cache-0":        "/nix/store-host",
-					"cache-1":        "/nix/var/nix/daemon-socket-host",
-					"cache-2":        "/var/lib/docker",
+					"mount-0":        "/nix/store-host",
+					"mount-1":        "/nix/var/nix/daemon-socket-host",
+					"mount-2":        "/var/lib/docker",
 				}
 
 				for expectedName, expectedPath := range expectedMounts {
@@ -318,9 +318,9 @@ var _ = Describe("ytt Overlay Processing", func() {
 				volumes := podSpec["volumes"].([]interface{})
 				expectedVolumes := map[string]string{
 					"hook-extension": "configMap",
-					"cache-0":        "hostPath",
-					"cache-1":        "hostPath",
-					"cache-2":        "emptyDir",
+					"mount-0":        "hostPath",
+					"mount-1":        "hostPath",
+					"mount-2":        "emptyDir",
 				}
 
 				for expectedName, expectedType := range expectedVolumes {

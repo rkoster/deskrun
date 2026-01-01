@@ -269,4 +269,3 @@ func TestRunnerInstallationWithMounts(t *testing.T) {
 		t.Errorf("Second mount Type = %v, want DirectoryOrCreate", installation.Mounts[1].Type)
 	}
 }
-
