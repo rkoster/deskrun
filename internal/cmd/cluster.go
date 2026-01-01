@@ -62,10 +62,17 @@ func runClusterCreate(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Detected Nix daemon socket at: %s\n", nixSocket.HostPath)
 	}
 
+	// Detect deskrun cache directory
+	deskrunCache := cluster.DetectDeskrunCache()
+	if deskrunCache != nil {
+		fmt.Printf("Using deskrun cache directory: %s\n", deskrunCache.HostPath)
+	}
+
 	clusterConfig := &types.ClusterConfig{
-		Name:      configMgr.GetConfig().ClusterName,
-		NixStore:  nixStore,
-		NixSocket: nixSocket,
+		Name:         configMgr.GetConfig().ClusterName,
+		NixStore:     nixStore,
+		NixSocket:    nixSocket,
+		DeskrunCache: deskrunCache,
 	}
 	clusterMgr := cluster.NewManager(clusterConfig)
 

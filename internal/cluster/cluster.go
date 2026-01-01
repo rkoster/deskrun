@@ -89,12 +89,12 @@ func (m *Manager) Delete(ctx context.Context) error {
 }
 
 // DetectNixMounts detects available nix mounts on the host system
-func DetectNixMounts() (*types.NixMount, *types.NixMount) {
-	var nixStore, nixSocket *types.NixMount
+func DetectNixMounts() (*types.Mount, *types.Mount) {
+	var nixStore, nixSocket *types.Mount
 
 	// Check for /nix/store
 	if _, err := os.Stat("/nix/store"); err == nil {
-		nixStore = &types.NixMount{
+		nixStore = &types.Mount{
 			HostPath:      "/nix/store",
 			ContainerPath: "/nix/store",
 		}
@@ -108,7 +108,7 @@ func DetectNixMounts() (*types.NixMount, *types.NixMount) {
 
 	for _, socketPath := range nixSocketPaths {
 		if _, err := os.Stat(socketPath); err == nil {
-			nixSocket = &types.NixMount{
+			nixSocket = &types.Mount{
 				HostPath:      socketPath,
 				ContainerPath: "/nix/var/nix/daemon-socket/socket",
 			}
@@ -119,7 +119,29 @@ func DetectNixMounts() (*types.NixMount, *types.NixMount) {
 	return nixStore, nixSocket
 }
 
-// buildKindConfig creates a kind cluster configuration with nix mounts
+// DetectDeskrunCache detects the host deskrun cache directory and creates mount config
+func DetectDeskrunCache() *types.Mount {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to get home directory for deskrun cache: %v\n", err)
+		return nil
+	}
+
+	deskrunCachePath := filepath.Join(homeDir, ".cache", "deskrun")
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(deskrunCachePath, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create deskrun cache directory at %s: %v\n", deskrunCachePath, err)
+		return nil
+	}
+
+	return &types.Mount{
+		HostPath:      deskrunCachePath,
+		ContainerPath: "/host-cache/deskrun",
+	}
+}
+
+// buildKindConfig creates a kind cluster configuration with nix and cache mounts
 func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 	config := &v1alpha4.Cluster{
 		TypeMeta: v1alpha4.TypeMeta{
@@ -151,6 +173,13 @@ func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 		extraMounts = append(extraMounts, v1alpha4.Mount{
 			HostPath:      filepath.Dir(m.config.NixSocket.HostPath),
 			ContainerPath: socketDir,
+		})
+	}
+
+	if m.config.DeskrunCache != nil {
+		extraMounts = append(extraMounts, v1alpha4.Mount{
+			HostPath:      m.config.DeskrunCache.HostPath,
+			ContainerPath: m.config.DeskrunCache.ContainerPath,
 		})
 	}
 
