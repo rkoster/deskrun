@@ -38,7 +38,7 @@ const (
 	MountTypeSocket MountType = "Socket"
 )
 
-// Mount represents a host path to be mounted into pods
+// Mount represents a host path to be mounted into pods.
 type Mount struct {
 	// Source path on the host machine (can be empty for DirectoryOrCreate to auto-generate; must be provided for Socket types)
 	Source string
