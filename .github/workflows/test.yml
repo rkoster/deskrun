@@ -21,6 +21,9 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
       
+      - name: Clean Go cache
+        run: go clean -cache -modcache
+      
       - name: Verify dependencies
         run: go mod verify
       
@@ -59,6 +62,9 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+      
+      - name: Clean Go cache
+        run: go clean -cache -modcache
       
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
