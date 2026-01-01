@@ -20,12 +20,36 @@ type RunnerInstallation struct {
 	MinRunners    int
 	MaxRunners    int
 	Instances     int // Number of separate runner scale set instances to create
-	CachePaths    []CachePath
+	Mounts        []Mount
+	CachePaths    []CachePath // Deprecated: Use Mounts instead. Kept for backward compatibility.
 	AuthType      AuthType
 	AuthValue     string
 }
 
+// MountType represents the type of host mount
+type MountType string
+
+const (
+	// MountTypeDirectoryOrCreate creates a directory if it doesn't exist
+	MountTypeDirectoryOrCreate MountType = "DirectoryOrCreate"
+	// MountTypeDirectory mounts an existing directory
+	MountTypeDirectory MountType = "Directory"
+	// MountTypeSocket mounts a Unix socket
+	MountTypeSocket MountType = "Socket"
+)
+
+// Mount represents a host path to be mounted into pods
+type Mount struct {
+	// Source path on the host machine (empty means auto-generated for DirectoryOrCreate)
+	Source string
+	// Target path inside the container where the mount will be mounted
+	Target string
+	// Type specifies the hostPath volume type (defaults to DirectoryOrCreate)
+	Type MountType
+}
+
 // CachePath represents a path to be cached using hostPath volumes
+// Deprecated: Use Mount instead. This type is kept for backward compatibility.
 type CachePath struct {
 	// Target path inside the container where the cache will be mounted
 	Target string

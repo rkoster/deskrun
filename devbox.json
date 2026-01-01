@@ -15,7 +15,19 @@
     ],
     "scripts": {
       "test": [
-        "echo \"Error: no test specified\" && exit 1"
+        "make test"
+      ],
+      "build": [
+        "make build"
+      ],
+      "check": [
+        "make check"
+      ],
+      "test-types": [
+        "go test -v ./pkg/types/..."
+      ],
+      "test-accept": [
+        "ACCEPT_DIFF=true go test ./pkg/templates/... ./internal/runner/..."
       ]
     }
   }

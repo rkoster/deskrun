@@ -23,7 +23,19 @@ installation:
   #@schema/validation min=1
   maxRunners: 3
   
-  #@schema/desc "Cache path configurations for privileged mode"
+  #@schema/desc "Mount configurations for volumes"
+  #@schema/nullable
+  mounts:
+  - #@schema/desc "Mount configuration"
+    #@schema/desc "Source path on host"
+    source: ""
+    #@schema/desc "Target path in container"  
+    target: ""
+    #@schema/desc "Mount type - must be one of: DirectoryOrCreate, Directory, Socket"
+    #@schema/validation one_of=["DirectoryOrCreate", "Directory", "Socket"]
+    type: "DirectoryOrCreate"
+  
+  #@schema/desc "Cache path configurations (deprecated, use mounts instead)"
   #@schema/nullable
   cachePaths:
   - #@schema/desc "Cache path mapping"
