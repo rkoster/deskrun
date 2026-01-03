@@ -99,6 +99,24 @@ func runList(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("Auth Type:     %s\n", installation.AuthType)
 
+		if len(installation.Mounts) > 0 {
+			fmt.Printf("Mounts:        ")
+			for i, mount := range installation.Mounts {
+				if i > 0 {
+					fmt.Printf("               ")
+				}
+				if mount.Source != "" {
+					if mount.Type != "" && mount.Type != types.MountTypeDirectoryOrCreate {
+						fmt.Printf("%s:%s:%s\n", mount.Source, mount.Target, mount.Type)
+					} else {
+						fmt.Printf("%s:%s\n", mount.Source, mount.Target)
+					}
+				} else {
+					fmt.Printf("%s\n", mount.Target)
+				}
+			}
+		}
+
 		if len(installation.CachePaths) > 0 {
 			fmt.Printf("Cache Paths:   ")
 			for i, path := range installation.CachePaths {

@@ -20,12 +20,36 @@ type RunnerInstallation struct {
 	MinRunners    int
 	MaxRunners    int
 	Instances     int // Number of separate runner scale set instances to create
-	CachePaths    []CachePath
+	Mounts        []Mount
+	CachePaths    []CachePath // Deprecated: Use Mounts instead. Kept for backward compatibility.
 	AuthType      AuthType
 	AuthValue     string
 }
 
+// MountType represents the type of host mount
+type MountType string
+
+const (
+	// MountTypeDirectoryOrCreate creates a directory if it doesn't exist
+	MountTypeDirectoryOrCreate MountType = "DirectoryOrCreate"
+	// MountTypeDirectory mounts an existing directory
+	MountTypeDirectory MountType = "Directory"
+	// MountTypeSocket mounts a Unix socket
+	MountTypeSocket MountType = "Socket"
+)
+
+// Mount represents a host path to be mounted into pods.
+type Mount struct {
+	// Source path on the host machine (can be empty for DirectoryOrCreate to auto-generate; must be provided for Socket types)
+	Source string
+	// Target path inside the container where the mount will be mounted
+	Target string
+	// Type specifies the hostPath volume type (defaults to DirectoryOrCreate)
+	Type MountType
+}
+
 // CachePath represents a path to be cached using hostPath volumes
+// Deprecated: Use Mount instead. This type is kept for backward compatibility.
 type CachePath struct {
 	// Target path inside the container where the cache will be mounted
 	Target string
@@ -45,17 +69,18 @@ const (
 type ClusterConfig struct {
 	Name         string
 	Network      string
-	NixStore     *Mount // Optional nix store mount
-	NixSocket    *Mount // Optional nix socket mount
-	DeskrunCache *Mount // Optional deskrun cache mount
+	NixStore     *ClusterMount // Optional nix store mount
+	NixSocket    *ClusterMount // Optional nix socket mount
+	DeskrunCache *ClusterMount // Optional deskrun cache mount
+	DockerSocket *ClusterMount // Optional docker socket mount
 }
 
-// Mount represents a host-to-container mount configuration
-type Mount struct {
+// ClusterMount represents a host-to-container mount configuration for cluster nodes
+type ClusterMount struct {
 	HostPath      string // Host path to mount from
 	ContainerPath string // Container path to mount to
 }
 
-// NixMount is deprecated: use Mount instead
+// NixMount is deprecated: use ClusterMount instead
 // Kept for backward compatibility
-type NixMount = Mount
+type NixMount = ClusterMount

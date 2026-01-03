@@ -17,7 +17,8 @@ var (
 	addInstances  int
 	addAuthType   string
 	addAuthValue  string
-	addCachePaths []string
+	addCachePaths []string // Deprecated: kept for backward compatibility
+	addMounts     []string
 )
 
 var addCmd = &cobra.Command{
@@ -44,29 +45,34 @@ Examples:
   # Add a standard runner (single instance, scales 1-5)
   deskrun add my-runner --repository https://github.com/owner/repo --auth-type pat --auth-value ghp_xxx
 
-  # Add a privileged runner with Nix cache (single instance, scales 1-5)
-  deskrun add nix-runner \
+  # Add a privileged runner with Docker cache (single instance, scales 1-5)
+  deskrun add docker-runner \
     --repository https://github.com/owner/repo \
     --mode cached-privileged-kubernetes \
-    --cache /nix/store \
+    --mount /var/lib/docker \
     --max-runners 5 \
     --auth-type pat --auth-value ghp_xxx
 
-  # Add a privileged runner with custom source and target cache paths
+  # Add a privileged runner with custom source and target mount paths
   deskrun add custom-runner \
     --repository https://github.com/owner/repo \
     --mode cached-privileged-kubernetes \
-    --cache /host/cache/npm:/root/.npm \
-    --cache /host/cache/cargo:/usr/local/cargo/registry \
+    --mount /host/cache/npm:/root/.npm \
+    --mount /host/cache/cargo:/usr/local/cargo/registry \
+    --auth-type pat --auth-value ghp_xxx
+
+  # Add a runner with Docker socket mount for host Docker access
+  deskrun add docker-runner \
+    --repository https://github.com/owner/repo \
+    --mount /var/run/docker.sock:/var/run/docker.sock:Socket \
     --auth-type pat --auth-value ghp_xxx
 
   # Add a privileged runner with 3 instances for cache isolation
   # Each instance runs exactly 1 runner with dedicated cache paths
-  deskrun add nix-runner \
+  deskrun add multi-runner \
     --repository https://github.com/owner/repo \
     --mode cached-privileged-kubernetes \
-    --cache /nix/store \
-    --cache /var/lib/docker \
+    --mount /var/lib/docker \
     --instances 3 \
     --auth-type pat --auth-value ghp_xxx
 
@@ -85,7 +91,8 @@ func init() {
 	addCmd.Flags().IntVar(&addInstances, "instances", 1, "Number of separate runner scale set instances (each will have min=1, max=1 for cache isolation)")
 	addCmd.Flags().StringVar(&addAuthType, "auth-type", "pat", "Authentication type (pat, github-app)")
 	addCmd.Flags().StringVar(&addAuthValue, "auth-value", "", "Authentication value (PAT token or GitHub App private key)")
-	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Cache paths to mount. Format: target or src:target (can be specified multiple times)")
+	addCmd.Flags().StringSliceVar(&addMounts, "mount", []string{}, "Mount paths. Format: target, src:target, or src:target:type (can be specified multiple times)")
+	addCmd.Flags().StringSliceVar(&addCachePaths, "cache", []string{}, "Deprecated: use --mount instead. Cache paths to mount. Format: target or src:target")
 
 	if err := addCmd.MarkFlagRequired("repository"); err != nil {
 		panic(err)
@@ -127,7 +134,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid auth type: %s", addAuthType)
 	}
 
-	// Create cache paths
+	// Create cache paths from --cache flag (deprecated, for backward compatibility)
 	cachePaths := []types.CachePath{}
 	for _, path := range addCachePaths {
 		// Parse src:target notation
@@ -156,8 +163,82 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Validate parameters including cache paths
-	if err := validateAddParams(addInstances, addMaxRunners, containerMode, cachePaths); err != nil {
+	// Create mounts from --mount flag (new format)
+	mounts := []types.Mount{}
+	for _, path := range addMounts {
+		// Parse src:target:type notation
+		// Supported formats:
+		// - target (auto-generated source, DirectoryOrCreate type)
+		// - src:target (explicit source, DirectoryOrCreate type)
+		// - src:target:type (explicit source and type)
+		var source, target string
+		mountType := types.MountTypeDirectoryOrCreate
+
+		parts := strings.Split(path, ":")
+		switch len(parts) {
+		case 1:
+			// Just target path, auto-generate source
+			target = parts[0]
+			safePath := strings.TrimPrefix(path, "/")
+			safePath = strings.ReplaceAll(safePath, "/", "-")
+			source = fmt.Sprintf("/tmp/deskrun-cache/%s", safePath)
+		case 2:
+			// src:target
+			source = parts[0]
+			target = parts[1]
+		case 3:
+			// src:target:type
+			source = parts[0]
+			target = parts[1]
+			typeStr := parts[2]
+			switch typeStr {
+			case "DirectoryOrCreate":
+				mountType = types.MountTypeDirectoryOrCreate
+			case "Directory":
+				mountType = types.MountTypeDirectory
+			case "Socket":
+				mountType = types.MountTypeSocket
+			default:
+				return fmt.Errorf("invalid mount type '%s', must be one of: DirectoryOrCreate, Directory, Socket", typeStr)
+			}
+		default:
+			return fmt.Errorf("invalid mount format '%s', expected target, src:target, or src:target:type", path)
+		}
+
+		mounts = append(mounts, types.Mount{
+			Source: source,
+			Target: target,
+			Type:   mountType,
+		})
+	}
+
+	// Check for duplicates within mounts
+	mountTargets := make(map[string]struct{}, len(mounts))
+	for _, m := range mounts {
+		if _, exists := mountTargets[m.Target]; exists {
+			return fmt.Errorf("duplicate mount target '%s' specified multiple times", m.Target)
+		}
+		mountTargets[m.Target] = struct{}{}
+	}
+
+	// Validate that there are no duplicate target paths between deprecated --cache
+	// paths (cachePaths) and new --mount targets. Using the same target path with
+	// both flags would result in duplicate volume mounts and cause pod creation
+	// to fail with duplicate mountPath errors.
+	if len(cachePaths) > 0 && len(mounts) > 0 {
+		cacheTargets := make(map[string]struct{}, len(cachePaths))
+		for _, p := range cachePaths {
+			cacheTargets[p.Target] = struct{}{}
+		}
+		for _, m := range mounts {
+			if _, exists := cacheTargets[m.Target]; exists {
+				return fmt.Errorf("duplicate mount target '%s' specified via both --cache and --mount; use only one of these flags for this path", m.Target)
+			}
+		}
+	}
+
+	// Validate parameters including mounts
+	if err := validateAddParams(addInstances, addMaxRunners, containerMode, cachePaths, mounts); err != nil {
 		return err
 	}
 
@@ -178,7 +259,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		MinRunners:    minRunners,
 		MaxRunners:    maxRunners,
 		Instances:     addInstances,
-		CachePaths:    cachePaths,
+		Mounts:        mounts,
+		CachePaths:    cachePaths, // Keep for backward compatibility
 		AuthType:      authType,
 		AuthValue:     addAuthValue,
 	}
@@ -200,8 +282,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateAddParams validates the instances, max-runners, and cache paths
-func validateAddParams(instances, maxRunners int, containerMode types.ContainerMode, cachePaths []types.CachePath) error {
+// validateAddParams validates the instances, max-runners, cache paths, and mounts
+func validateAddParams(instances, maxRunners int, containerMode types.ContainerMode, cachePaths []types.CachePath, mounts []types.Mount) error {
 	// Validate instances
 	if instances < 1 {
 		return fmt.Errorf("instances must be at least 1")
@@ -228,6 +310,30 @@ func validateAddParams(instances, maxRunners int, containerMode types.ContainerM
 		// Validate that source path is absolute when provided
 		if cachePath.Source != "" && !strings.HasPrefix(cachePath.Source, "/") {
 			return fmt.Errorf("cache source path '%s' must be an absolute path", cachePath.Source)
+		}
+	}
+
+	// Validate mounts - provide helpful guidance for /nix/store
+	for _, mount := range mounts {
+		if mount.Target == "/nix/store" {
+			return fmt.Errorf(
+				"mount target /nix/store is not supported in deskrun: " +
+					"mounting host paths directly to /nix/store breaks NixOS containers by overwriting essential NixOS binaries and libraries.\n\n" +
+					"To cache Nix packages, consider:\n" +
+					"1. Use the opencode-workspace-action with overlayfs support for /nix/store caching\n" +
+					"2. Mount alternative paths like /root/.cache/nix for user-level Nix cache\n" +
+					"3. Mount /var/lib/docker for Docker layer caching (unaffected by this limitation)\n\n" +
+					"See: https://github.com/rkoster/opencode-workspace-action/issues (overlay filesystem support for /nix/store)")
+		}
+
+		// Validate that target path is absolute
+		if !strings.HasPrefix(mount.Target, "/") {
+			return fmt.Errorf("mount target path '%s' must be an absolute path", mount.Target)
+		}
+
+		// Validate that source path is absolute when provided
+		if mount.Source != "" && !strings.HasPrefix(mount.Source, "/") {
+			return fmt.Errorf("mount source path '%s' must be an absolute path", mount.Source)
 		}
 	}
 

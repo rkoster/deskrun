@@ -89,12 +89,12 @@ func (m *Manager) Delete(ctx context.Context) error {
 }
 
 // DetectNixMounts detects available nix mounts on the host system
-func DetectNixMounts() (*types.Mount, *types.Mount) {
-	var nixStore, nixSocket *types.Mount
+func DetectNixMounts() (*types.ClusterMount, *types.ClusterMount) {
+	var nixStore, nixSocket *types.ClusterMount
 
 	// Check for /nix/store
 	if _, err := os.Stat("/nix/store"); err == nil {
-		nixStore = &types.Mount{
+		nixStore = &types.ClusterMount{
 			HostPath:      "/nix/store",
 			ContainerPath: "/nix/store",
 		}
@@ -108,7 +108,7 @@ func DetectNixMounts() (*types.Mount, *types.Mount) {
 
 	for _, socketPath := range nixSocketPaths {
 		if _, err := os.Stat(socketPath); err == nil {
-			nixSocket = &types.Mount{
+			nixSocket = &types.ClusterMount{
 				HostPath:      socketPath,
 				ContainerPath: "/nix/var/nix/daemon-socket/socket",
 			}
@@ -120,7 +120,7 @@ func DetectNixMounts() (*types.Mount, *types.Mount) {
 }
 
 // DetectDeskrunCache detects the host deskrun cache directory and creates mount config
-func DetectDeskrunCache() *types.Mount {
+func DetectDeskrunCache() *types.ClusterMount {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to get home directory for deskrun cache: %v\n", err)
@@ -135,10 +135,25 @@ func DetectDeskrunCache() *types.Mount {
 		return nil
 	}
 
-	return &types.Mount{
+	return &types.ClusterMount{
 		HostPath:      deskrunCachePath,
 		ContainerPath: "/host-cache/deskrun",
 	}
+}
+
+// DetectDockerSocket detects if Docker socket is available on the host system
+func DetectDockerSocket() *types.ClusterMount {
+	dockerSocketPath := "/var/run/docker.sock"
+
+	// Check if Docker socket exists
+	if _, err := os.Stat(dockerSocketPath); err == nil {
+		return &types.ClusterMount{
+			HostPath:      dockerSocketPath,
+			ContainerPath: dockerSocketPath,
+		}
+	}
+
+	return nil
 }
 
 // buildKindConfig creates a kind cluster configuration with nix and cache mounts
@@ -180,6 +195,13 @@ func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 		extraMounts = append(extraMounts, v1alpha4.Mount{
 			HostPath:      m.config.DeskrunCache.HostPath,
 			ContainerPath: m.config.DeskrunCache.ContainerPath,
+		})
+	}
+
+	if m.config.DockerSocket != nil {
+		extraMounts = append(extraMounts, v1alpha4.Mount{
+			HostPath:      m.config.DockerSocket.HostPath,
+			ContainerPath: m.config.DockerSocket.ContainerPath,
 		})
 	}
 

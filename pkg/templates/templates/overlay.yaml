@@ -70,12 +70,18 @@
 #@     {"name": "glibc-compat", "mountPath": "/lib64"},
 #@     {"name": "glibc-compat", "mountPath": "/lib/x86_64-linux-gnu"}
 #@   ]
-#@   
-#@   # Add cache path volume mounts
-#@   for i, cachePath in enumerate(data.values.installation.cachePaths):
-#@     volumeMounts.append({"name": "cache-" + str(i), "mountPath": cachePath.target})
-#@   end
-#@   
+  #@   
+  #@   # Add cache path volume mounts (deprecated - for backward compatibility)
+  #@   for i, cachePath in enumerate(data.values.installation.cachePaths):
+  #@     volumeMounts.append({"name": "mount-" + str(i), "mountPath": cachePath.target})
+  #@   end
+  #@   
+  #@   # Add mount volume mounts (new field)
+  #@   for i, mount in enumerate(data.values.installation.mounts):
+  #@     mount_index = i + len(data.values.installation.cachePaths)
+  #@     volumeMounts.append({"name": "mount-" + str(mount_index), "mountPath": mount.target})
+  #@   end
+  #@   
 #@   # Note: externals (/__e), work (/__w), and github (/github) volumes are automatically
 #@   # added by the k8s-novolume hooks, so we don't include them here to avoid duplicates.
 #@   # The hooks handle all GitHub workspace paths including /github/workflow/event.json
@@ -94,21 +100,38 @@
 #@     {"name": "shm", "hostPath": {"path": "/dev/shm", "type": "Directory"}},
 #@     {"name": "glibc-compat", "emptyDir": {}}
 #@   ]
-#@   
-#@   # Add cache path volumes
-#@   for i, cachePath in enumerate(data.values.installation.cachePaths):
-#@     cache_source = cachePath.source
-#@     if cache_source == "":
-#@       instance_num = data.values.installation.instanceNum if hasattr(data.values.installation, "instanceNum") else 0
-#@       if instance_num > 0:
-#@         cache_source = "/tmp/github-runner-cache/" + data.values.installation.name + "-" + str(instance_num) + "/cache-" + str(i)
-#@       else:
-#@         cache_source = "/tmp/github-runner-cache/" + data.values.installation.name + "/cache-" + str(i)
-#@       end
-#@     end
-#@     volumes.append({"name": "cache-" + str(i), "hostPath": {"path": cache_source, "type": "DirectoryOrCreate"}})
-#@   end
-#@   
+  #@   
+  #@   # Add cache path volumes (deprecated - for backward compatibility)
+  #@   for i, cachePath in enumerate(data.values.installation.cachePaths):
+  #@     cache_source = cachePath.source
+  #@     if cache_source == "":
+  #@       instance_num = data.values.installation.instanceNum if hasattr(data.values.installation, "instanceNum") else 0
+  #@       if instance_num > 0:
+  #@         cache_source = "/tmp/github-runner-cache/" + data.values.installation.name + "-" + str(instance_num) + "/mount-" + str(i)
+  #@       else:
+  #@         cache_source = "/tmp/github-runner-cache/" + data.values.installation.name + "/mount-" + str(i)
+  #@       end
+  #@     end
+  #@     volumes.append({"name": "mount-" + str(i), "hostPath": {"path": cache_source, "type": "DirectoryOrCreate"}})
+  #@   end
+  #@   
+  #@   # Add mount volumes (new field)
+  #@   for i, mount in enumerate(data.values.installation.mounts):
+  #@     mount_index = i + len(data.values.installation.cachePaths)
+  #@     mount_source = mount.source
+  #@     if mount_source == "":
+  #@       instance_num = data.values.installation.instanceNum if hasattr(data.values.installation, "instanceNum") else 0
+  #@       if instance_num > 0:
+  #@         mount_source = "/tmp/github-runner-cache/" + data.values.installation.name + "-" + str(instance_num) + "/mount-" + str(mount_index)
+  #@       else:
+  #@         mount_source = "/tmp/github-runner-cache/" + data.values.installation.name + "/mount-" + str(mount_index)
+  #@       end
+  #@     end
+  #@     # Determine hostPath type based on mount type
+  #@     mount_type = mount.type if hasattr(mount, "type") and mount.type != "" else "DirectoryOrCreate"
+  #@     volumes.append({"name": "mount-" + str(mount_index), "hostPath": {"path": mount_source, "type": mount_type}})
+  #@   end
+  #@   
 #@   spec["containers"] = [container]
 #@   spec["volumes"] = volumes
 #@   
@@ -379,8 +402,13 @@ spec:
           mountPath: /etc/hooks
           readOnly: true
         #@ for i, cachePath in enumerate(data.values.installation.cachePaths):
-        - name: #@ "cache-" + str(i)
+        - name: #@ "mount-" + str(i)
           mountPath: #@ cachePath.target
+        #@ end
+        #@ for i, mount in enumerate(data.values.installation.mounts):
+        #@   mount_index = i + len(data.values.installation.cachePaths)
+        - name: #@ "mount-" + str(mount_index)
+          mountPath: #@ mount.target
         #@ end
       #@overlay/replace
       volumes:
@@ -389,13 +417,25 @@ spec:
           name: #@ "privileged-hook-extension-" + data.values.installation.name
           defaultMode: 0755
       #@ for i, cachePath in enumerate(data.values.installation.cachePaths):
-      - name: #@ "cache-" + str(i)
+      - name: #@ "mount-" + str(i)
         #@ if cachePath.source == "":
         emptyDir: {}
         #@ else:
         hostPath:
           path: #@ cachePath.source
           type: DirectoryOrCreate
+        #@ end
+      #@ end
+      #@ for i, mount in enumerate(data.values.installation.mounts):
+      #@   mount_index = i + len(data.values.installation.cachePaths)
+      - name: #@ "mount-" + str(mount_index)
+        #@ if mount.source == "":
+        emptyDir: {}
+        #@ else:
+        #@   mount_type = mount.type if hasattr(mount, "type") and mount.type != "" else "DirectoryOrCreate"
+        hostPath:
+          path: #@ mount.source
+          type: #@ mount_type
         #@ end
       #@ end
 #@ end

@@ -177,7 +177,7 @@ func (p *Processor) transformTemplateForYtt(templateContent string) string {
 
 // buildDataValues creates the ytt data values YAML from the configuration
 func (p *Processor) buildDataValues(config Config) ([]byte, error) {
-	// Convert cache paths to simple map format for easier ytt access
+	// Convert cache paths to simple map format for easier ytt access (deprecated, for backward compatibility)
 	var cachePaths []map[string]string
 	for _, cp := range config.Installation.CachePaths {
 		cachePaths = append(cachePaths, map[string]string{
@@ -191,6 +191,21 @@ func (p *Processor) buildDataValues(config Config) ([]byte, error) {
 		cachePaths = []map[string]string{}
 	}
 
+	// Convert mounts to map format for ytt access
+	var mounts []map[string]string
+	for _, m := range config.Installation.Mounts {
+		mounts = append(mounts, map[string]string{
+			"target": m.Target,
+			"source": m.Source,
+			"type":   string(m.Type),
+		})
+	}
+
+	// If no mounts, use empty array (not nil) for ytt
+	if mounts == nil {
+		mounts = []map[string]string{}
+	}
+
 	dataValues := map[string]any{
 		"installation": map[string]any{
 			"name":          config.InstanceName,
@@ -199,7 +214,8 @@ func (p *Processor) buildDataValues(config Config) ([]byte, error) {
 			"containerMode": string(config.Installation.ContainerMode),
 			"minRunners":    config.Installation.MinRunners,
 			"maxRunners":    config.Installation.MaxRunners,
-			"cachePaths":    cachePaths,
+			"cachePaths":    cachePaths, // Deprecated, for backward compatibility
+			"mounts":        mounts,
 			"instanceNum":   config.InstanceNum,
 		},
 	}

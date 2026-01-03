@@ -64,7 +64,7 @@ data:
           mountPath: /lib64
         - name: glibc-compat
           mountPath: /lib/x86_64-linux-gnu
-        - name: cache-0
+        - name: mount-0
           mountPath: /var/lib/docker
       volumes:
       - name: sys
@@ -93,9 +93,9 @@ data:
           type: Directory
       - name: glibc-compat
         emptyDir: {}
-      - name: cache-0
+      - name: mount-0
         hostPath:
-          path: /tmp/github-runner-cache/test-runner-1/cache-0
+          path: /tmp/github-runner-cache/test-runner-1/mount-0
           type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -378,7 +378,7 @@ spec:
         - name: hook-extension
           mountPath: /etc/hooks
           readOnly: true
-        - name: cache-0
+        - name: mount-0
           mountPath: /var/lib/docker
         securityContext:
           privileged: true
@@ -390,7 +390,7 @@ spec:
         configMap:
           name: privileged-hook-extension-test-runner
           defaultMode: 493
-      - name: cache-0
+      - name: mount-0
         emptyDir: {}
       securityContext:
         fsGroup: 123

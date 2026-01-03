@@ -130,3 +130,142 @@ func TestClusterConfig(t *testing.T) {
 		t.Errorf("Network = %v, want test-network", config.Network)
 	}
 }
+
+func TestMountTypeConstants(t *testing.T) {
+	tests := []struct {
+		name      string
+		mountType MountType
+		want      string
+	}{
+		{
+			name:      "directory or create",
+			mountType: MountTypeDirectoryOrCreate,
+			want:      "DirectoryOrCreate",
+		},
+		{
+			name:      "directory",
+			mountType: MountTypeDirectory,
+			want:      "Directory",
+		},
+		{
+			name:      "socket",
+			mountType: MountTypeSocket,
+			want:      "Socket",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if string(tt.mountType) != tt.want {
+				t.Errorf("MountType = %v, want %v", tt.mountType, tt.want)
+			}
+		})
+	}
+}
+
+func TestMount(t *testing.T) {
+	tests := []struct {
+		name   string
+		mount  Mount
+		verify func(*testing.T, Mount)
+	}{
+		{
+			name: "directory or create mount with auto-generated source",
+			mount: Mount{
+				Source: "",
+				Target: "/nix/store",
+				Type:   MountTypeDirectoryOrCreate,
+			},
+			verify: func(t *testing.T, m Mount) {
+				if m.Target != "/nix/store" {
+					t.Errorf("Target = %v, want /nix/store", m.Target)
+				}
+				if m.Type != MountTypeDirectoryOrCreate {
+					t.Errorf("Type = %v, want DirectoryOrCreate", m.Type)
+				}
+			},
+		},
+		{
+			name: "socket mount",
+			mount: Mount{
+				Source: "/var/run/docker.sock",
+				Target: "/var/run/docker.sock",
+				Type:   MountTypeSocket,
+			},
+			verify: func(t *testing.T, m Mount) {
+				if m.Source != "/var/run/docker.sock" {
+					t.Errorf("Source = %v, want /var/run/docker.sock", m.Source)
+				}
+				if m.Target != "/var/run/docker.sock" {
+					t.Errorf("Target = %v, want /var/run/docker.sock", m.Target)
+				}
+				if m.Type != MountTypeSocket {
+					t.Errorf("Type = %v, want Socket", m.Type)
+				}
+			},
+		},
+		{
+			name: "directory mount with explicit source",
+			mount: Mount{
+				Source: "/host/path",
+				Target: "/container/path",
+				Type:   MountTypeDirectory,
+			},
+			verify: func(t *testing.T, m Mount) {
+				if m.Source != "/host/path" {
+					t.Errorf("Source = %v, want /host/path", m.Source)
+				}
+				if m.Target != "/container/path" {
+					t.Errorf("Target = %v, want /container/path", m.Target)
+				}
+				if m.Type != MountTypeDirectory {
+					t.Errorf("Type = %v, want Directory", m.Type)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.verify(t, tt.mount)
+		})
+	}
+}
+
+func TestRunnerInstallationWithMounts(t *testing.T) {
+	installation := &RunnerInstallation{
+		Name:          "test-runner",
+		Repository:    "https://github.com/owner/repo",
+		ContainerMode: ContainerModeKubernetes,
+		MinRunners:    1,
+		MaxRunners:    5,
+		Instances:     1,
+		Mounts: []Mount{
+			{
+				Source: "/var/run/docker.sock",
+				Target: "/var/run/docker.sock",
+				Type:   MountTypeSocket,
+			},
+			{
+				Source: "/tmp/cache",
+				Target: "/cache",
+				Type:   MountTypeDirectoryOrCreate,
+			},
+		},
+		AuthType:  AuthTypePAT,
+		AuthValue: "ghp_test",
+	}
+
+	if installation.Name != "test-runner" {
+		t.Errorf("Name = %v, want test-runner", installation.Name)
+	}
+	if len(installation.Mounts) != 2 {
+		t.Errorf("Mounts length = %v, want 2", len(installation.Mounts))
+	}
+	if installation.Mounts[0].Type != MountTypeSocket {
+		t.Errorf("First mount Type = %v, want Socket", installation.Mounts[0].Type)
+	}
+	if installation.Mounts[1].Type != MountTypeDirectoryOrCreate {
+		t.Errorf("Second mount Type = %v, want DirectoryOrCreate", installation.Mounts[1].Type)
+	}
+}

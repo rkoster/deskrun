@@ -129,17 +129,17 @@ func TestDockerCachePersistenceTemplates(t *testing.T) {
 				Target: "/var/lib/docker",
 			},
 			wantContains: []string{
-				// Cache should be mounted in runner container
+				// Cache should be mounted
 				"mountPath: /var/lib/docker",
 				// Should use hostPath volume
 				"path: /nvme/docker-images",
 				"type: DirectoryOrCreate",
-				// Verify cache-0 specifically uses hostPath (not emptyDir)
-				"name: cache-0\n        hostPath:",
+				// Verify mount-0 specifically uses hostPath (not emptyDir)
+				"name: mount-0\n        hostPath:",
 			},
 			wantNotContains: []string{
-				// cache-0 specifically should NOT be emptyDir (GitHub workspace volumes will be emptyDir, which is correct)
-				"name: cache-0\n        emptyDir:",
+				// mount-0 specifically should NOT be emptyDir (GitHub workspace volumes will be emptyDir, which is correct)
+				"name: mount-0\n        emptyDir:",
 			},
 		},
 		{
