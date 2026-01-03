@@ -141,6 +141,21 @@ func DetectDeskrunCache() *types.ClusterMount {
 	}
 }
 
+// DetectDockerSocket detects if Docker socket is available on the host system
+func DetectDockerSocket() *types.ClusterMount {
+	dockerSocketPath := "/var/run/docker.sock"
+
+	// Check if Docker socket exists
+	if _, err := os.Stat(dockerSocketPath); err == nil {
+		return &types.ClusterMount{
+			HostPath:      dockerSocketPath,
+			ContainerPath: dockerSocketPath,
+		}
+	}
+
+	return nil
+}
+
 // buildKindConfig creates a kind cluster configuration with nix and cache mounts
 func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 	config := &v1alpha4.Cluster{
@@ -180,6 +195,13 @@ func (m *Manager) buildKindConfig() *v1alpha4.Cluster {
 		extraMounts = append(extraMounts, v1alpha4.Mount{
 			HostPath:      m.config.DeskrunCache.HostPath,
 			ContainerPath: m.config.DeskrunCache.ContainerPath,
+		})
+	}
+
+	if m.config.DockerSocket != nil {
+		extraMounts = append(extraMounts, v1alpha4.Mount{
+			HostPath:      m.config.DockerSocket.HostPath,
+			ContainerPath: m.config.DockerSocket.ContainerPath,
 		})
 	}
 

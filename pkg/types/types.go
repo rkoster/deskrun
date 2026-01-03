@@ -72,6 +72,7 @@ type ClusterConfig struct {
 	NixStore     *ClusterMount // Optional nix store mount
 	NixSocket    *ClusterMount // Optional nix socket mount
 	DeskrunCache *ClusterMount // Optional deskrun cache mount
+	DockerSocket *ClusterMount // Optional docker socket mount
 }
 
 // ClusterMount represents a host-to-container mount configuration for cluster nodes
