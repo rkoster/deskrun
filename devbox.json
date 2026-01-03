@@ -1,1 +1,22 @@
-../_context/repos/rkoster/deskrun/devbox.json
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "gnumake@latest",
+    "go@latest",
+    "kubernetes-helm@latest",
+    "gh@latest",
+    "kapp@latest",
+    "golangci-lint@latest",
+    "vendir@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Welcome to devbox!' > /dev/null"
+    ],
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
+    }
+  }
+}
