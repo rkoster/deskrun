@@ -42,6 +42,21 @@ The deskrun pattern mounts the host's `/nix/store` and nix daemon socket into wo
 
 **Prerequisites:** `nix-setup.sh` must have run first
 
+### `install-docker.sh` - Docker CLI Installation
+
+**Purpose:** Install docker CLI via nix profile for use with host Docker daemon
+
+**What it does:**
+1. Verifies nix is configured
+2. Installs docker CLI via `nix profile install nixpkgs#docker`
+3. Adds docker to PATH
+4. Verifies installation
+5. Exports updated PATH to `$GITHUB_ENV`
+
+**Prerequisites:** `nix-setup.sh` must have run first
+
+**Note:** This only installs the docker CLI client. For Docker-in-Docker, use `dind-setup.sh` instead.
+
 ### `dind-setup.sh` - Docker-in-Docker Setup
 
 **Purpose:** Start Docker daemon for container builds within workflows
@@ -58,7 +73,7 @@ The deskrun pattern mounts the host's `/nix/store` and nix daemon socket into wo
 
 **Prerequisites:** `nix-setup.sh` must have run first
 
-**Note:** For host Docker mode (connecting to host's docker.sock), you don't need this script - just add docker client to your `devbox.json` and ensure the socket is mounted.
+**Note:** For host Docker mode (connecting to host's docker.sock), use `install-docker.sh` instead - it's simpler and faster.
 
 ## Prerequisites
 
@@ -199,18 +214,21 @@ jobs:
       - name: Install Devbox
         run: .github/scripts/install-devbox.sh
       
+      - name: Install Docker CLI
+        run: .github/scripts/install-docker.sh
+      
       - name: Build image with host Docker
-        run: devbox run -- docker build -t myapp:latest .
+        run: docker build -t myapp:latest .
+      
+      - name: Tag and push images
+        run: |
+          docker tag myapp:latest registry.example.com/myapp:latest
+          docker push registry.example.com/myapp:latest
 ```
 
 **Requirements for host Docker mode:**
 1. Ensure your runner mounts `/var/run/docker.sock`
-2. Add `docker` package to your `devbox.json`:
-   ```json
-   {
-     "packages": ["docker@latest"]
-   }
-   ```
+2. Run `install-docker.sh` to install the docker CLI via nix
 3. No `dind-setup.sh` needed!
 
 ## Vendoring Scripts with vendir
@@ -232,6 +250,7 @@ directories:
         includePaths:
           - public/nix-setup.sh
           - public/install-devbox.sh
+          - public/install-docker.sh
           - public/dind-setup.sh
         newRootPath: public
 ```
@@ -277,15 +296,15 @@ The busybox bootstrap pattern is more robust than relying on pre-installed packa
 
 ### Separate Scripts
 
-Three focused scripts rather than one monolithic script allows flexibility:
-- Not every workflow needs DinD
+Four focused scripts rather than one monolithic script allows flexibility:
+- Not every workflow needs Docker
 - Can use host Docker instead of DinD
 - Clear separation of concerns
 - Easier to debug
 
-### Host Docker Mode Needs No Script
+### Host Docker Mode Uses `install-docker.sh`
 
-Simply mount `/var/run/docker.sock` and add docker client to `devbox.json`. This is simpler and often performs better than DinD.
+Installing docker CLI via `nix profile install` makes it globally available in PATH, avoiding the need to wrap every docker command in `devbox run`. This is cleaner than adding docker to `devbox.json` where the CLI is only accessible within the devbox environment.
 
 ### VFS Storage Driver for DinD
 
@@ -363,6 +382,10 @@ options: --privileged --init
 ### By `install-devbox.sh`
 
 - `PATH=$HOME/.nix-profile/bin:$PATH` - Updated PATH with devbox
+
+### By `install-docker.sh`
+
+- `PATH=$HOME/.nix-profile/bin:$PATH` - Updated PATH with docker CLI
 
 ### By `dind-setup.sh`
 
