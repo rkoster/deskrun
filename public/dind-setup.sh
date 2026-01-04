@@ -10,6 +10,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+DOCKERD_PID=""
+
 log_info() {
     echo -e "${BLUE}[dind-setup]${NC} $1"
 }
@@ -128,9 +130,14 @@ fi
 if [ $RETRY_NEEDED -eq 1 ]; then
     log_info "Cleaning up for retry..."
     
-    log_info "Killing dockerd processes..."
-    pkill -9 dockerd 2>/dev/null || true
-    sleep 2
+    log_info "Killing dockerd processes (graceful shutdown)..."
+    pkill dockerd 2>/dev/null || true
+    sleep 5
+    if pgrep dockerd >/dev/null 2>&1; then
+        log_warn "dockerd still running after SIGTERM, sending SIGKILL..."
+        pkill -9 dockerd 2>/dev/null || true
+        sleep 2
+    fi
     
     log_info "Clearing /var/lib/docker..."
     rm -rf /var/lib/docker/*

@@ -94,20 +94,34 @@ options: --privileged --init
 
 ### Deskrun Runner Configuration
 
-Your deskrun runner must mount:
+Your deskrun runner must mount the nix store and daemon socket. Use these copy-pastable commands:
 
-```yaml
-# For nix/devbox (always required)
-- hostPath: /nix/store
-  containerPath: /nix/store-host
-  
-- hostPath: /nix/var/nix/daemon-socket
-  containerPath: /nix/var/nix/daemon-socket-host
+#### For Nix/Devbox Only
 
-# For host Docker mode (optional)
-- hostPath: /var/run/docker.sock
-  containerPath: /var/run/docker.sock
+```bash
+deskrun add my-runner \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx \
+  --cache /nix/store:/nix/store-host \
+  --cache /nix/var/nix/daemon-socket:/nix/var/nix/daemon-socket-host:Socket
 ```
+
+#### For Nix/Devbox + Host Docker
+
+```bash
+deskrun add my-runner \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx \
+  --cache /nix/store:/nix/store-host \
+  --cache /nix/var/nix/daemon-socket:/nix/var/nix/daemon-socket-host:Socket \
+  --cache /var/run/docker.sock:/var/run/docker.sock:Socket
+```
+
+**Note:** The `:Socket` suffix tells deskrun to mount the path as a Unix socket rather than a regular directory.
 
 ## Usage Patterns
 

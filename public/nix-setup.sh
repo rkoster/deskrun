@@ -61,9 +61,13 @@ done
 
 # Install busybox to /bin for persistence across GitHub Actions steps
 log_info "Installing busybox to /bin..."
-cp "$BOOTSTRAP_DIR/busybox" /bin/busybox 2>/dev/null || true
+if ! cp "$BOOTSTRAP_DIR/busybox" /bin/busybox 2>/dev/null; then
+    log_warn "Failed to install busybox to /bin (permission or filesystem issue?). Continuing without /bin busybox."
+fi
 for cmd in mount mkdir ls find cat grep head tail dirname basename wc tr cut sort uniq; do
-    ln -sf busybox "/bin/$cmd" 2>/dev/null || true
+    if ! ln -sf busybox "/bin/$cmd" 2>/dev/null; then
+        log_warn "Failed to create busybox symlink for '$cmd' in /bin. Continuing without this /bin command."
+    fi
 done
 
 # Copy SSL CA bundle
@@ -90,8 +94,10 @@ log_info "Phase 0.5: Setting up GitHub workspace directories..."
 if [ -d "/__w/_temp/_github_workflow" ]; then
     log_info "Copying /__w/_temp/_github_workflow to /github/workflow..."
     mkdir -p /github/workflow
-    cp -r /__w/_temp/_github_workflow/* /github/workflow/ 2>/dev/null || true
-    log_success "GitHub workflow directory copied"
+    if ! cp -r /__w/_temp/_github_workflow/* /github/workflow/ 2>/dev/null; then
+        log_warn "Failed to copy some files from /__w/_temp/_github_workflow (may be empty or permission issue)"
+    fi
+    log_success "GitHub workflow directory setup complete"
 else
     log_info "No /__w/_temp/_github_workflow found - skipping (non-deskrun environment)"
 fi
@@ -100,8 +106,10 @@ fi
 if [ -d "/__w/_temp/_github_home" ]; then
     log_info "Copying /__w/_temp/_github_home to /github/home..."
     mkdir -p /github/home
-    cp -r /__w/_temp/_github_home/* /github/home/ 2>/dev/null || true
-    log_success "GitHub home directory copied"
+    if ! cp -r /__w/_temp/_github_home/* /github/home/ 2>/dev/null; then
+        log_warn "Failed to copy some files from /__w/_temp/_github_home (may be empty or permission issue)"
+    fi
+    log_success "GitHub home directory setup complete"
 else
     log_info "No /__w/_temp/_github_home found - skipping (non-deskrun environment)"
 fi
@@ -184,13 +192,23 @@ log_success "Phase 2 complete - nix configured and tested"
 # ============================================================================
 if [ -n "$GITHUB_ENV" ]; then
     log_info "Exporting environment variables to GITHUB_ENV..."
+    
+    # Build an updated PATH that includes required entries without duplicating them
+    UPDATED_PATH="$PATH"
+    for _p in "$HOME/.nix-profile/bin" "/tmp/bootstrap/bin"; do
+        case ":$UPDATED_PATH:" in
+            *":$_p:"*) ;;
+            *) UPDATED_PATH="$_p:$UPDATED_PATH" ;;
+        esac
+    done
+    
     {
         echo "NIX_REMOTE=daemon"
         echo "NIX_DAEMON_SOCKET_PATH=/nix/var/nix/daemon-socket/socket"
         echo "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
         echo "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
         echo "CURL_CA_BUNDLE=/etc/ssl/certs/ca-bundle.crt"
-        echo "PATH=$HOME/.nix-profile/bin:/tmp/bootstrap/bin:$PATH"
+        echo "PATH=$UPDATED_PATH"
     } >> "$GITHUB_ENV"
     log_success "Environment variables exported to GITHUB_ENV"
 else

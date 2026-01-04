@@ -61,7 +61,14 @@ fi
 
 if [ -n "$GITHUB_ENV" ]; then
     log_info "Exporting PATH to GITHUB_ENV..."
-    echo "PATH=$HOME/.nix-profile/bin:$PATH" >> "$GITHUB_ENV"
+    
+    UPDATED_PATH="$PATH"
+    case ":$UPDATED_PATH:" in
+        *":$HOME/.nix-profile/bin:"*) ;;
+        *) UPDATED_PATH="$HOME/.nix-profile/bin:$UPDATED_PATH" ;;
+    esac
+    
+    echo "PATH=$UPDATED_PATH" >> "$GITHUB_ENV"
     log_success "PATH exported to GITHUB_ENV"
 else
     log_warn "GITHUB_ENV not set - PATH not persisted for future steps"
