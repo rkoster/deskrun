@@ -304,6 +304,100 @@ The tool automatically:
 
 **Note**: The first time you add a runner, `deskrun` will automatically install the GitHub Actions Runner Controller using Helm. This may take a minute or two. Each runner is then deployed as a separate Helm release.
 
+## Remote Cluster Hosts (Incus)
+
+For running deskrun on remote infrastructure instead of your local machine, you can provision NixOS containers on Incus hosts with the `cluster-host` command.
+
+### What is a Cluster Host?
+
+A cluster host is a NixOS container running on Incus, pre-configured with:
+- Docker daemon
+- Kind (Kubernetes in Docker)
+- kubectl
+- deskrun CLI (via Nix flakes)
+
+This allows you to run GitHub Actions runners on dedicated infrastructure (like a local server or cloud VM running IncusOS) without impacting your local development environment.
+
+### Prerequisites
+
+- An Incus installation (local or remote)
+- Access configured via `incus remote` (use `incus remote list` to see available remotes)
+
+### Creating a Cluster Host
+
+```bash
+# Create with auto-generated name
+deskrun cluster-host create
+
+# Create with custom name and disk size
+deskrun cluster-host create --name my-host --disk 300GiB
+
+# Create with specific NixOS image
+deskrun cluster-host create --image images:nixos/24.11
+```
+
+The creation process:
+1. Launches a NixOS container with the specified disk size
+2. Configures security.nesting=true (required for Docker-in-container)
+3. Installs Docker, Kind, kubectl, and deskrun
+4. Runs nixos-rebuild to apply the configuration
+5. Saves the cluster host info to your deskrun config
+
+### Using a Cluster Host
+
+Once created, you can access the cluster host and run deskrun commands:
+
+```bash
+# Access the container
+incus exec my-host -- bash
+
+# Inside the container, use deskrun normally
+deskrun add my-runner \
+  --repository https://github.com/owner/repo \
+  --mode cached-privileged-kubernetes \
+  --cache /var/lib/docker \
+  --auth-type pat \
+  --auth-value ghp_xxxxxxxxxxxxx
+
+deskrun up
+```
+
+### Managing Cluster Hosts
+
+```bash
+# List all cluster hosts
+deskrun cluster-host list
+
+# Re-apply NixOS configuration (useful after deskrun updates)
+deskrun cluster-host configure my-host
+
+# Delete a cluster host
+deskrun cluster-host delete my-host
+```
+
+### Remote Selection
+
+Cluster hosts are created on the current Incus remote. To use a different remote:
+
+```bash
+# List available remotes
+incus remote list
+
+# Switch to a different remote
+incus remote switch my-remote-server
+
+# Now create a cluster host on that remote
+deskrun cluster-host create
+```
+
+### Container Specifications
+
+- **Image**: NixOS 25.11 container (not VM)
+- **Default Disk**: 200GiB (configurable)
+- **Security**: Nested containers enabled (required for Docker/Kind)
+- **Network**: Outgoing connectivity (no port forwarding needed)
+- **Configuration**: Managed via embedded NixOS module
+
 ## Troubleshooting
 
 ### Runners Not Picking Up Jobs

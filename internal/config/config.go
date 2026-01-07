@@ -18,6 +18,7 @@ const (
 type Config struct {
 	ClusterName   string                               `json:"cluster_name"`
 	Installations map[string]*types.RunnerInstallation `json:"installations"`
+	ClusterHosts  map[string]*types.ClusterHost        `json:"cluster_hosts,omitempty"`
 }
 
 // Manager handles configuration persistence
@@ -50,6 +51,7 @@ func NewManager() (*Manager, error) {
 			m.config = &Config{
 				ClusterName:   "deskrun",
 				Installations: make(map[string]*types.RunnerInstallation),
+				ClusterHosts:  make(map[string]*types.ClusterHost),
 			}
 			return m, nil
 		}
@@ -116,6 +118,10 @@ func (m *Manager) Load() error {
 
 	if m.config.Installations == nil {
 		m.config.Installations = make(map[string]*types.RunnerInstallation)
+	}
+
+	if m.config.ClusterHosts == nil {
+		m.config.ClusterHosts = make(map[string]*types.ClusterHost)
 	}
 
 	return nil
@@ -233,4 +239,30 @@ func (m *Manager) GetInstallation(name string) (*types.RunnerInstallation, error
 		return nil, fmt.Errorf("installation %s not found", name)
 	}
 	return installation, nil
+}
+
+func (m *Manager) AddClusterHost(host *types.ClusterHost) error {
+	if m.config.ClusterHosts[host.Name] != nil {
+		return fmt.Errorf("cluster host %s already exists", host.Name)
+	}
+
+	m.config.ClusterHosts[host.Name] = host
+	return m.Save()
+}
+
+func (m *Manager) RemoveClusterHost(name string) error {
+	if m.config.ClusterHosts[name] == nil {
+		return fmt.Errorf("cluster host %s does not exist", name)
+	}
+
+	delete(m.config.ClusterHosts, name)
+	return m.Save()
+}
+
+func (m *Manager) GetClusterHost(name string) (*types.ClusterHost, error) {
+	host := m.config.ClusterHosts[name]
+	if host == nil {
+		return nil, fmt.Errorf("cluster host %s not found", name)
+	}
+	return host, nil
 }
