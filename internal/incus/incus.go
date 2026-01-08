@@ -326,43 +326,34 @@ func (m *Manager) EnsureGoodStoragePool(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to list storage pools: %w", err)
 	}
 
-	// First pass: Look for existing good pools (zfs or dir)
+	// First pass: Look for existing dir pool (preferred for performance)
 	for _, pool := range pools {
 		driver, err := m.DetectStorageDriver(ctx, pool)
 		if err != nil {
 			continue // Skip pools we can't inspect
 		}
 
-		if driver == "zfs" || driver == "dir" {
+		if driver == "dir" {
 			return pool, nil
 		}
 	}
 
-	// Second pass: Check if default pool is good enough
+	// Second pass: Check if default pool is good enough (not btrfs)
 	for _, pool := range pools {
 		if pool == "default" {
 			driver, err := m.DetectStorageDriver(ctx, pool)
 			if err == nil && driver != "btrfs" {
-				// Default pool is not btrfs, so it's probably okay
+				// Default pool is not btrfs, so it's usable
 				return pool, nil
 			}
 		}
 	}
 
-	// No suitable pool found, create one
-	// Prefer ZFS, fallback to dir if ZFS creation fails
+	// No suitable pool found, create a dir pool (simple, performant, no overhead)
 	poolName := "deskrun-pool"
-	
-	// Try ZFS first
-	err = m.CreateStoragePool(ctx, poolName, "zfs", "100GB")
-	if err == nil {
-		return poolName, nil
-	}
-
-	// ZFS failed, try dir as fallback
 	err = m.CreateStoragePool(ctx, poolName, "dir", "")
 	if err != nil {
-		return "", fmt.Errorf("failed to create storage pool (tried zfs and dir): %w", err)
+		return "", fmt.Errorf("failed to create dir storage pool: %w", err)
 	}
 
 	return poolName, nil
