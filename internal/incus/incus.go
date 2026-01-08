@@ -37,18 +37,49 @@ func (m *Manager) CreateContainer(ctx context.Context, name, image, diskSize str
 		return fmt.Errorf("disk size must end with GiB, GB, MiB, or MB: %s", diskSize)
 	}
 
+	// Ensure the default bridge network exists
+	if err := m.ensureNetwork(ctx); err != nil {
+		return fmt.Errorf("failed to ensure network: %w", err)
+	}
+
 	args := []string{
 		"launch",
 		image,
 		name,
 		"-d", fmt.Sprintf("root,size=%s", diskSize),
+		"-n", "incusbr0",
 		"-c", "security.nesting=true",
+		"-c", "security.privileged=true",
 	}
 
 	cmd := exec.CommandContext(ctx, "incus", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create container: %w (output: %s)", err, string(output))
+	}
+
+	// Add /dev/kmsg device for kubelet
+	addDeviceCmd := exec.CommandContext(ctx, "incus", "config", "device", "add", name, "kmsg", "unix-char", "source=/dev/kmsg", "path=/dev/kmsg")
+	output, err = addDeviceCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add kmsg device: %w (output: %s)", err, string(output))
+	}
+
+	return nil
+}
+
+func (m *Manager) ensureNetwork(ctx context.Context) error {
+	// Check if incusbr0 network exists
+	cmd := exec.CommandContext(ctx, "incus", "network", "show", "incusbr0")
+	if err := cmd.Run(); err == nil {
+		return nil // Network already exists
+	}
+
+	// Create the bridge network
+	cmd = exec.CommandContext(ctx, "incus", "network", "create", "incusbr0", "--type=bridge")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create network: %w (output: %s)", err, string(output))
 	}
 
 	return nil
@@ -177,6 +208,26 @@ func (m *Manager) WaitForRunning(ctx context.Context, name string, timeout time.
 	return fmt.Errorf("timeout waiting for container to be running")
 }
 
+func (m *Manager) WaitForNetwork(ctx context.Context, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		// Try to ping a well-known DNS server to check network connectivity
+		_, err := m.Exec(ctx, name, "timeout", "2", "ping", "-c", "1", "1.1.1.1")
+		if err == nil {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+
+	return fmt.Errorf("timeout waiting for network connectivity")
+}
+
 func (m *Manager) isRunning(ctx context.Context, name string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "incus", "list", name, "--format=csv", "-c", "s")
 	output, err := cmd.CombinedOutput()
@@ -186,4 +237,20 @@ func (m *Manager) isRunning(ctx context.Context, name string) (bool, error) {
 
 	status := strings.TrimSpace(string(output))
 	return status == "RUNNING", nil
+}
+
+func (m *Manager) PushConfigFile(ctx context.Context, containerName, configPath string) error {
+	// Create .deskrun directory in container
+	if _, err := m.Exec(ctx, containerName, "mkdir", "-p", "/root/.deskrun"); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Use incus file push to copy the config file
+	cmd := exec.CommandContext(ctx, "incus", "file", "push", configPath, fmt.Sprintf("%s/root/.deskrun/config.json", containerName))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to push config file: %w (output: %s)", err, string(output))
+	}
+
+	return nil
 }

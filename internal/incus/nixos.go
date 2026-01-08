@@ -11,6 +11,38 @@ import (
 var deskrunNixTemplate string
 
 func (m *Manager) ConfigureNixOS(ctx context.Context, containerName string) error {
+	// Update nix channels to ensure NIX_PATH is properly set up
+	fmt.Println("Updating nix channels...")
+	if _, err := m.Exec(ctx, containerName, "nix-channel", "--update"); err != nil {
+		return fmt.Errorf("failed to update nix channels: %w", err)
+	}
+
+	// Verify the channel was actually downloaded, with retries
+	var verifyOutput string
+	var err error
+	for i := 0; i < 5; i++ {
+		verifyOutput, err = m.Exec(ctx, containerName, "ls", "-la", "/nix/var/nix/profiles/per-user/root/channels/")
+		if err != nil {
+			return fmt.Errorf("failed to verify channels: %w", err)
+		}
+
+		if strings.Contains(verifyOutput, "nixos ->") {
+			break
+		}
+
+		if i < 4 {
+			// Wait a bit and try updating again
+			fmt.Println("Channel not ready yet, retrying...")
+			if _, err := m.Exec(ctx, containerName, "nix-channel", "--update"); err != nil {
+				return fmt.Errorf("failed to retry nix channel update: %w", err)
+			}
+		}
+	}
+
+	if !strings.Contains(verifyOutput, "nixos ->") {
+		return fmt.Errorf("nixos channel symlink not found after update")
+	}
+
 	if err := m.PushContent(ctx, containerName, deskrunNixTemplate, "/etc/nixos/deskrun.nix"); err != nil {
 		return fmt.Errorf("failed to push deskrun.nix: %w", err)
 	}
@@ -80,7 +112,9 @@ func (m *Manager) ConfigureNixOS(ctx context.Context, containerName string) erro
 	}
 
 	fmt.Println("Running nixos-rebuild switch (this may take a few minutes)...")
-	if _, err := m.Exec(ctx, containerName, "nixos-rebuild", "switch"); err != nil {
+	// Run nixos-rebuild with NIX_PATH set to use the channels
+	nixPathCmd := "export NIX_PATH=\"nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos:nixos-config=/etc/nixos/configuration.nix\" && nixos-rebuild switch"
+	if _, err := m.Exec(ctx, containerName, "bash", "-c", nixPathCmd); err != nil {
 		return fmt.Errorf("failed to run nixos-rebuild switch: %w", err)
 	}
 

@@ -266,3 +266,8 @@ func (m *Manager) GetClusterHost(name string) (*types.ClusterHost, error) {
 	}
 	return host, nil
 }
+
+// GetConfigPath returns the path to the config file
+func (m *Manager) GetConfigPath() string {
+	return m.configPath
+}

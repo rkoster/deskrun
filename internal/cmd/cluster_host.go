@@ -127,9 +127,20 @@ func runClusterHostCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("container failed to start: %w", err)
 	}
 
+	fmt.Println("Waiting for network connectivity...")
+	if err := incusMgr.WaitForNetwork(ctx, name, 2*time.Minute); err != nil {
+		_ = incusMgr.DeleteContainer(ctx, name)
+		return fmt.Errorf("network failed to initialize: %w", err)
+	}
+
 	fmt.Println("Configuring NixOS with Docker, Kind, and deskrun...")
 	if err := incusMgr.ConfigureNixOS(ctx, name); err != nil {
 		return fmt.Errorf("failed to configure NixOS: %w", err)
+	}
+
+	fmt.Println("Copying deskrun configuration to cluster host...")
+	if err := incusMgr.PushConfigFile(ctx, name, configMgr.GetConfigPath()); err != nil {
+		return fmt.Errorf("failed to push config file: %w", err)
 	}
 
 	host := &types.ClusterHost{
