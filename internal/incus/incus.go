@@ -20,6 +20,23 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) CreateContainer(ctx context.Context, name, image, diskSize string) error {
+	if name == "" {
+		return fmt.Errorf("container name cannot be empty")
+	}
+	if strings.ContainsAny(name, " /\\:@#$%^&*()[]{}!?'\"<>,;|`~+=") {
+		return fmt.Errorf("container name contains invalid characters: %s", name)
+	}
+	if image == "" {
+		return fmt.Errorf("image cannot be empty")
+	}
+	if diskSize == "" {
+		return fmt.Errorf("disk size cannot be empty")
+	}
+	if !strings.HasSuffix(diskSize, "GiB") && !strings.HasSuffix(diskSize, "GB") &&
+		!strings.HasSuffix(diskSize, "MiB") && !strings.HasSuffix(diskSize, "MB") {
+		return fmt.Errorf("disk size must end with GiB, GB, MiB, or MB: %s", diskSize)
+	}
+
 	args := []string{
 		"launch",
 		image,
@@ -66,7 +83,12 @@ func (m *Manager) ContainerExists(ctx context.Context, name string) (bool, error
 		return false, fmt.Errorf("failed to list containers: %w (output: %s)", err, string(output))
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	outputStr := strings.TrimSpace(string(output))
+	if outputStr == "" {
+		return false, nil
+	}
+
+	lines := strings.Split(outputStr, "\n")
 	for _, line := range lines {
 		if strings.TrimSpace(line) == name {
 			return true, nil
@@ -110,8 +132,9 @@ func (m *Manager) ListContainers(ctx context.Context, prefix string) ([]Containe
 }
 
 func (m *Manager) PushContent(ctx context.Context, container, content, remotePath string) error {
-	cmd := exec.CommandContext(ctx, "incus", "exec", container, "--", "sh", "-c",
-		fmt.Sprintf("cat > %s <<'EOF'\n%s\nEOF", remotePath, content))
+	// Use stdin redirection to avoid shell injection vulnerabilities
+	cmd := exec.CommandContext(ctx, "incus", "exec", container, "--", "sh", "-c", `cat > "$1"`, "sh", remotePath)
+	cmd.Stdin = strings.NewReader(content)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to push content: %w (output: %s)", err, string(output))

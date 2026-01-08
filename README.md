@@ -333,7 +333,7 @@ deskrun cluster-host create
 deskrun cluster-host create --name my-host --disk 300GiB
 
 # Create with specific NixOS image
-deskrun cluster-host create --image images:nixos/24.11
+deskrun cluster-host create --image images:nixos/25.11
 ```
 
 The creation process:

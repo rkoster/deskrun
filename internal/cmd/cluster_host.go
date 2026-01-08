@@ -42,7 +42,7 @@ Examples:
   deskrun cluster-host create --name my-host --disk 300GiB
 
   # Create with specific NixOS image
-  deskrun cluster-host create --image images:nixos/24.11`,
+  deskrun cluster-host create --image images:nixos/25.11`,
 	RunE: runClusterHostCreate,
 }
 
@@ -198,9 +198,21 @@ func runClusterHostList(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	containers, err := incusMgr.ListContainers(ctx, "deskrun-")
+	allContainers, err := incusMgr.ListContainers(ctx, "")
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	configuredHosts := make(map[string]bool)
+	for name := range configMgr.GetConfig().ClusterHosts {
+		configuredHosts[name] = true
+	}
+
+	var containers []incus.ContainerInfo
+	for _, container := range allContainers {
+		if configuredHosts[container.Name] {
+			containers = append(containers, container)
+		}
 	}
 
 	if len(containers) == 0 && len(configMgr.GetConfig().ClusterHosts) == 0 {
