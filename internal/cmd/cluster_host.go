@@ -115,9 +115,16 @@ func runClusterHostCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Creating cluster host '%s'...\n", name)
-	fmt.Println("Launching NixOS container...")
+	
+	fmt.Println("Selecting optimal storage pool...")
+	storagePool, err := incusMgr.EnsureGoodStoragePool(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to ensure storage pool: %w", err)
+	}
+	fmt.Printf("Using storage pool: %s\n", storagePool)
 
-	if err := incusMgr.CreateContainer(ctx, name, clusterHostImage, clusterHostDiskSize); err != nil {
+	fmt.Println("Launching NixOS container...")
+	if err := incusMgr.CreateContainer(ctx, name, clusterHostImage, clusterHostDiskSize, storagePool); err != nil {
 		return fmt.Errorf("failed to create container: %w", err)
 	}
 

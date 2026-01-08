@@ -19,7 +19,7 @@ func NewManager() *Manager {
 	return &Manager{}
 }
 
-func (m *Manager) CreateContainer(ctx context.Context, name, image, diskSize string) error {
+func (m *Manager) CreateContainer(ctx context.Context, name, image, diskSize, storagePool string) error {
 	if name == "" {
 		return fmt.Errorf("container name cannot be empty")
 	}
@@ -50,6 +50,11 @@ func (m *Manager) CreateContainer(ctx context.Context, name, image, diskSize str
 		"-n", "incusbr0",
 		"-c", "security.nesting=true",
 		"-c", "security.privileged=true",
+	}
+
+	// Add storage pool if specified
+	if storagePool != "" {
+		args = append(args, "-s", storagePool)
 	}
 
 	cmd := exec.CommandContext(ctx, "incus", args...)
@@ -253,4 +258,112 @@ func (m *Manager) PushConfigFile(ctx context.Context, containerName, configPath 
 	}
 
 	return nil
+}
+
+// ListStoragePools returns a list of available storage pool names
+func (m *Manager) ListStoragePools(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "incus", "storage", "list", "--format=csv", "-c", "n")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list storage pools: %w (output: %s)", err, string(output))
+	}
+
+	var pools []string
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		pools = append(pools, strings.TrimSpace(line))
+	}
+
+	return pools, nil
+}
+
+// DetectStorageDriver returns the driver type for a given storage pool
+func (m *Manager) DetectStorageDriver(ctx context.Context, poolName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "incus", "storage", "show", poolName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to show storage pool: %w (output: %s)", err, string(output))
+	}
+
+	// Parse the output to find the driver line
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "driver:") {
+			driver := strings.TrimSpace(strings.TrimPrefix(line, "driver:"))
+			return driver, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not find driver in storage pool info")
+}
+
+// CreateStoragePool creates a new storage pool
+func (m *Manager) CreateStoragePool(ctx context.Context, name, driver, size string) error {
+	args := []string{"storage", "create", name, driver}
+	
+	// Add size parameter for zfs and btrfs
+	if size != "" && (driver == "zfs" || driver == "btrfs") {
+		args = append(args, fmt.Sprintf("size=%s", size))
+	}
+
+	cmd := exec.CommandContext(ctx, "incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create storage pool: %w (output: %s)", err, string(output))
+	}
+
+	return nil
+}
+
+// EnsureGoodStoragePool ensures a storage pool suitable for Docker workloads exists
+// Returns the name of the storage pool to use
+func (m *Manager) EnsureGoodStoragePool(ctx context.Context) (string, error) {
+	pools, err := m.ListStoragePools(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to list storage pools: %w", err)
+	}
+
+	// First pass: Look for existing good pools (zfs or dir)
+	for _, pool := range pools {
+		driver, err := m.DetectStorageDriver(ctx, pool)
+		if err != nil {
+			continue // Skip pools we can't inspect
+		}
+
+		if driver == "zfs" || driver == "dir" {
+			return pool, nil
+		}
+	}
+
+	// Second pass: Check if default pool is good enough
+	for _, pool := range pools {
+		if pool == "default" {
+			driver, err := m.DetectStorageDriver(ctx, pool)
+			if err == nil && driver != "btrfs" {
+				// Default pool is not btrfs, so it's probably okay
+				return pool, nil
+			}
+		}
+	}
+
+	// No suitable pool found, create one
+	// Prefer ZFS, fallback to dir if ZFS creation fails
+	poolName := "deskrun-pool"
+	
+	// Try ZFS first
+	err = m.CreateStoragePool(ctx, poolName, "zfs", "100GB")
+	if err == nil {
+		return poolName, nil
+	}
+
+	// ZFS failed, try dir as fallback
+	err = m.CreateStoragePool(ctx, poolName, "dir", "")
+	if err != nil {
+		return "", fmt.Errorf("failed to create storage pool (tried zfs and dir): %w", err)
+	}
+
+	return poolName, nil
 }
