@@ -338,14 +338,16 @@ func (m *Manager) EnsureGoodStoragePool(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Second pass: Check if default pool is good enough (not btrfs)
+	// Second pass: Look for any non-btrfs pool (zfs, lvm, etc. all work fine)
 	for _, pool := range pools {
-		if pool == "default" {
-			driver, err := m.DetectStorageDriver(ctx, pool)
-			if err == nil && driver != "btrfs" {
-				// Default pool is not btrfs, so it's usable
-				return pool, nil
-			}
+		driver, err := m.DetectStorageDriver(ctx, pool)
+		if err != nil {
+			continue // Skip pools we can't inspect
+		}
+
+		if driver != "btrfs" {
+			// Any non-btrfs pool is usable (zfs, lvm, dir, etc.)
+			return pool, nil
 		}
 	}
 
