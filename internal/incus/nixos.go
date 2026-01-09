@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 )
 
 //go:embed templates/deskrun.nix
@@ -31,8 +32,8 @@ func (m *Manager) ConfigureNixOS(ctx context.Context, containerName string) erro
 		}
 
 		if i < 4 {
-			// Wait a bit and try updating again
 			fmt.Println("Channel not ready yet, retrying...")
+			time.Sleep(3 * time.Second)
 			if _, err := m.Exec(ctx, containerName, "nix-channel", "--update"); err != nil {
 				return fmt.Errorf("failed to retry nix channel update: %w", err)
 			}

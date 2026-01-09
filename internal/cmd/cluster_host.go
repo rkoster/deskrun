@@ -137,11 +137,13 @@ func runClusterHostCreate(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Configuring NixOS with Docker, Kind, and deskrun...")
 	if err := incusMgr.ConfigureNixOS(ctx, name); err != nil {
+		_ = incusMgr.DeleteContainer(ctx, name)
 		return fmt.Errorf("failed to configure NixOS: %w", err)
 	}
 
 	fmt.Println("Copying deskrun configuration to cluster host...")
 	if err := incusMgr.PushConfigFile(ctx, name, configMgr.GetConfigPath()); err != nil {
+		_ = incusMgr.DeleteContainer(ctx, name)
 		return fmt.Errorf("failed to push config file: %w", err)
 	}
 

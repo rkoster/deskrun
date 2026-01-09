@@ -259,5 +259,3 @@ func (m *Manager) PushConfigFile(ctx context.Context, containerName, configPath 
 
 	return nil
 }
-
-
