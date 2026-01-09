@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	clusterHostName     string
-	clusterHostDiskSize string
-	clusterHostImage    string
+	clusterHostName        string
+	clusterHostDiskSize    string
+	clusterHostImage       string
+	clusterHostStoragePool string
 )
 
 var clusterHostCmd = &cobra.Command{
@@ -75,6 +76,7 @@ func init() {
 	clusterHostCreateCmd.Flags().StringVar(&clusterHostName, "name", "", "Container name (auto-generated if not specified)")
 	clusterHostCreateCmd.Flags().StringVar(&clusterHostDiskSize, "disk", "200GiB", "Root disk size")
 	clusterHostCreateCmd.Flags().StringVar(&clusterHostImage, "image", "images:nixos/25.11", "NixOS image to use")
+	clusterHostCreateCmd.Flags().StringVar(&clusterHostStoragePool, "storage-pool", "local", "Incus storage pool to use")
 
 	clusterHostCmd.AddCommand(clusterHostCreateCmd)
 	clusterHostCmd.AddCommand(clusterHostDeleteCmd)
@@ -115,16 +117,9 @@ func runClusterHostCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Creating cluster host '%s'...\n", name)
-	
-	fmt.Println("Selecting optimal storage pool...")
-	storagePool, err := incusMgr.EnsureGoodStoragePool(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to ensure storage pool: %w", err)
-	}
-	fmt.Printf("Using storage pool: %s\n", storagePool)
 
 	fmt.Println("Launching NixOS container...")
-	if err := incusMgr.CreateContainer(ctx, name, clusterHostImage, clusterHostDiskSize, storagePool); err != nil {
+	if err := incusMgr.CreateContainer(ctx, name, clusterHostImage, clusterHostDiskSize, clusterHostStoragePool); err != nil {
 		return fmt.Errorf("failed to create container: %w", err)
 	}
 
