@@ -213,3 +213,159 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Error("Config file was not created")
 	}
 }
+func TestAddClusterHost(t *testing.T) {
+	tmpHome, err := os.MkdirTemp("", "deskrun-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp home: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
+
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	mgr, err := NewManager()
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	host := &types.ClusterHost{
+		Name:      "test-host",
+		Image:     "images:nixos/25.11",
+		DiskSize:  "200GiB",
+		CreatedAt: "2026-01-08T00:00:00Z",
+	}
+
+	err = mgr.AddClusterHost(host)
+	if err != nil {
+		t.Fatalf("AddClusterHost() error = %v", err)
+	}
+
+	saved, err := mgr.GetClusterHost("test-host")
+	if err != nil {
+		t.Fatalf("GetClusterHost() error = %v", err)
+	}
+
+	if saved.Name != "test-host" {
+		t.Errorf("Name = %v, want test-host", saved.Name)
+	}
+
+	err = mgr.AddClusterHost(host)
+	if err == nil {
+		t.Error("AddClusterHost() expected error for duplicate, got nil")
+	}
+}
+
+func TestRemoveClusterHost(t *testing.T) {
+	tmpHome, err := os.MkdirTemp("", "deskrun-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp home: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
+
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	mgr, err := NewManager()
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	host := &types.ClusterHost{
+		Name:      "test-host",
+		Image:     "images:nixos/25.11",
+		DiskSize:  "200GiB",
+		CreatedAt: "2026-01-08T00:00:00Z",
+	}
+
+	err = mgr.AddClusterHost(host)
+	if err != nil {
+		t.Fatalf("AddClusterHost() error = %v", err)
+	}
+
+	err = mgr.RemoveClusterHost("test-host")
+	if err != nil {
+		t.Fatalf("RemoveClusterHost() error = %v", err)
+	}
+
+	_, err = mgr.GetClusterHost("test-host")
+	if err == nil {
+		t.Error("GetClusterHost() expected error after removal, got nil")
+	}
+
+	err = mgr.RemoveClusterHost("non-existent")
+	if err == nil {
+		t.Error("RemoveClusterHost() expected error for non-existent, got nil")
+	}
+}
+
+func TestGetClusterHost(t *testing.T) {
+	tmpHome, err := os.MkdirTemp("", "deskrun-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp home: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpHome)
+	})
+
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+	})
+
+	mgr, err := NewManager()
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, err = mgr.GetClusterHost("non-existent")
+	if err == nil {
+		t.Error("GetClusterHost() expected error for non-existent host, got nil")
+	}
+
+	host := &types.ClusterHost{
+		Name:      "test-host",
+		Image:     "images:nixos/25.11",
+		DiskSize:  "200GiB",
+		CreatedAt: "2026-01-08T00:00:00Z",
+	}
+
+	err = mgr.AddClusterHost(host)
+	if err != nil {
+		t.Fatalf("AddClusterHost() error = %v", err)
+	}
+
+	retrieved, err := mgr.GetClusterHost("test-host")
+	if err != nil {
+		t.Fatalf("GetClusterHost() error = %v", err)
+	}
+
+	if retrieved.Name != host.Name {
+		t.Errorf("Name = %v, want %v", retrieved.Name, host.Name)
+	}
+	if retrieved.Image != host.Image {
+		t.Errorf("Image = %v, want %v", retrieved.Image, host.Image)
+	}
+	if retrieved.DiskSize != host.DiskSize {
+		t.Errorf("DiskSize = %v, want %v", retrieved.DiskSize, host.DiskSize)
+	}
+	if retrieved.CreatedAt != host.CreatedAt {
+		t.Errorf("CreatedAt = %v, want %v", retrieved.CreatedAt, host.CreatedAt)
+	}
+}

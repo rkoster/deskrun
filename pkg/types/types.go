@@ -84,3 +84,11 @@ type ClusterMount struct {
 // NixMount is deprecated: use ClusterMount instead
 // Kept for backward compatibility
 type NixMount = ClusterMount
+
+// ClusterHost represents a remote Incus container running deskrun
+type ClusterHost struct {
+	Name      string `json:"name"`
+	Image     string `json:"image"`
+	DiskSize  string `json:"disk_size"`
+	CreatedAt string `json:"created_at"`
+}
